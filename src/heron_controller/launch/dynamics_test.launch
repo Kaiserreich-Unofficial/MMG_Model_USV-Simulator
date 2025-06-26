@@ -1,0 +1,10 @@
+<launch>
+  <!-- 加载配置 -->
+  <rosparam command="load" file="$(find heron_controller)/config/config.yaml"/>
+
+  <!-- 启动 dynamics_test 节点 -->
+  <node name="dynamics_test"
+        pkg="heron_controller"
+        type="dynamics_test"
+        output="screen" />
+</launch>

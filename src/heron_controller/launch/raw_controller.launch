@@ -1,0 +1,7 @@
+<launch>
+    <!-- 加载整个 YAML 文件 -->
+    <rosparam command="load" file="$(find heron_controller)/config/config.yaml" />
+
+    <!-- 启动节点 -->
+    <node name="mppi_controller" pkg="heron_controller" type="mppi_controller" output="screen" />
+  </launch>

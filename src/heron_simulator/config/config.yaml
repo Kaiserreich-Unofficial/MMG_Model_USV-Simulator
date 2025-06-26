@@ -1,0 +1,17 @@
+dt: 0.1
+integrator_type: rk4
+input_limit: 20.0
+hydrodynamics:
+  mass: 38.0
+  Iz:6.25
+  B: 0.74
+  Xu_dot: -1.9
+  Yv_dot: -29.3171
+  Nr_dot: -4.2155
+  Xu: 26.43
+  Yv: 72.64
+  Nr: 22.96
+topics:
+  odom: /heron/odom
+  left_thruster_cmd: /heron/left_thruster_cmd
+  right_thruster_cmd: /heron/right_thruster_cmd

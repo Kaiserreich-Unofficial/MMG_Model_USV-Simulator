@@ -1,0 +1,272 @@
+// ROS
+#include <ros/ros.h>
+#include <geometry_msgs/Twist.h>
+#include <nav_msgs/Odometry.h>
+#include <std_msgs/Float32.h>
+#include <tf/transform_datatypes.h>
+
+// MPPI includes
+#include <mppi/controllers/MPPI/mppi_controller.cuh>
+#include <mppi/controllers/Tube-MPPI/tube_mppi_controller.cuh>
+#include <mppi/cost_functions/quadratic_cost/quadratic_cost.cuh>
+#include <mppi/sampling_distributions/colored_noise/colored_noise.cuh>
+#include <mppi/feedback_controllers/DDP/ddp.cuh>
+
+// STD includes
+#include <iostream>
+#include <vector>
+#include <cstring>   // for memcpy
+#include <algorithm> // for fill
+#include <atomic>    // for atomic_bool
+#include <chrono>    // for time
+
+// USV model
+#include "usv_dynamics.cuh"
+#include "usv_mpc_plant.cuh"
+
+using DYN_T = heron::USVDynamics;
+using COST_T = QuadraticCost<DYN_T>;
+using COST_PARAM_T = QuadraticCostTrajectoryParams<DYN_T>;
+using FB_T = DDPFeedback<DYN_T, 100>;
+using SAMPLER_T = mppi::sampling_distributions::ColoredNoiseDistribution<DYN_T::DYN_PARAMS_T>;
+using CONTROLLER_T = VanillaMPPIController<DYN_T, COST_T, FB_T, 100, 8192, SAMPLER_T>;
+using CONTROLLER_PARAMS_T = CONTROLLER_T::TEMPLATED_PARAMS;
+using PLANT_T = heron::USVMPCPlant<CONTROLLER_T>;
+using state_array = DYN_T::state_array;
+using control_array = DYN_T::control_array;
+
+int DYN_BLOCK_X;
+constexpr uint8_t DYN_BLOCK_Y = DYN_T::STATE_DIM;
+state_array observed_state = state_array::Zero();
+state_array target_state = state_array::Zero(); // 观测状态量和目标状态量
+
+DYN_T dynamics;
+COST_T cost;
+COST_PARAM_T cost_params = cost.getParams();
+SAMPLER_T::SAMPLING_PARAMS_T sampler_params; // sampler需要在sampler_params构造好后再传入sampler中
+CONTROLLER_PARAMS_T controller_params;
+std::shared_ptr<CONTROLLER_T> controller; // mpc controller
+std::shared_ptr<FB_T> fb_controller;      // feedback controller
+std::shared_ptr<PLANT_T> plant;           // mpc plant
+
+// 心跳保活机制
+float heartbeat_duration;
+double hbeat_target_time = 0.0;
+bool hbeat_received_ = false;
+bool continuous_hb_received_ = false; // 用于首次恢复/丢失时打印日志
+
+// ROS控制指令发布者
+ros::Publisher left_thruster_pub;
+ros::Publisher right_thruster_pub;
+
+// Observer callback
+void observer_cb(const nav_msgs::Odometry::ConstPtr &state)
+{
+    observed_state[0] = state->pose.pose.position.x;
+    observed_state[1] = state->pose.pose.position.y;
+    observed_state[2] = tf::getYaw(state->pose.pose.orientation);
+    observed_state[3] = state->twist.twist.linear.x;
+    observed_state[4] = state->twist.twist.linear.y;
+    observed_state[5] = state->twist.twist.angular.z;
+}
+
+// Target callback
+void target_cb(const nav_msgs::Odometry::ConstPtr &state)
+{
+    target_state[0] = state->pose.pose.position.x;
+    target_state[1] = state->pose.pose.position.y;
+    target_state[2] = tf::getYaw(state->pose.pose.orientation);
+    target_state[3] = state->twist.twist.linear.x;
+    target_state[4] = state->twist.twist.linear.y;
+    target_state[5] = state->twist.twist.angular.z;
+    if (!continuous_hb_received_)
+    {
+        ROS_INFO_STREAM("心跳信号恢复，重新启动控制器...");
+        continuous_hb_received_ = true;
+    }
+    hbeat_received_ = true;
+}
+
+void mpc_plant_timer_cb(const ros::TimerEvent &event_)
+{
+    // 心跳超时检测
+    double now = ros::Time::now().toSec();
+    if (now > hbeat_target_time)
+    {
+        if (hbeat_received_)
+        {
+            // 本周期收到心跳，允许输出推进命令
+            hbeat_received_ = false;
+            // （推进器正常由后面的 cmd 发布）
+        }
+        else
+        {
+            // 丢失心跳，停用推进器
+            if (continuous_hb_received_)
+            {
+                ROS_WARN("心跳信号丢失 — 推进器已禁用！");
+                continuous_hb_received_ = false;
+            }
+            std_msgs::Float32 zero;
+            zero.data = 0.0;
+            left_thruster_pub.publish(zero);
+            right_thruster_pub.publish(zero);
+            return; // 跳过下发真实命令
+        }
+        // 设定下一个心跳检测点
+        hbeat_target_time = now + heartbeat_duration;
+    }
+
+    // 为了防止yaw角突变，首先计算一下航向角误差
+    float yaw_error = target_state(2) - observed_state(2);
+    // 将yaw_error直接累积到观测状态上，并将其作为目标状态的一部分
+    target_state(2) = observed_state(2) + yaw_error > M_PI ? yaw_error - 2 * M_PI : (yaw_error < -M_PI ? yaw_error + 2 * M_PI : yaw_error);
+    // ROS_INFO_STREAM("observed_state: " << observed_state.transpose().format(Eigen::IOFormat(4, 0, ", ", "\n", "[", "]")));
+    // ROS_INFO_STREAM("target_state: " << target_state.transpose().format(Eigen::IOFormat(4, 0, ", ", "\n", "[", "]")));
+    memcpy(cost_params.s_goal, target_state.data(), DYN_T::STATE_DIM * sizeof(float)); // 更新目标状态
+    plant->setCostParams(cost_params);
+    plant->updateState(observed_state, ros::Time::now().toSec());
+    static std::atomic<bool> alive(true); // 优化线程的存活标志
+    plant->runControlIteration(&alive);
+
+    ROS_INFO_STREAM("平均优化时间: " << std::fixed << std::setprecision(1) << plant->getAvgOptimizationTime() << " ms, 上次优化时间: " << std::setprecision(1) << plant->getLastOptimizationTime() << " ms");
+
+    Eigen::Vector2f ctrl = controller->getControlSeq().col(0);
+    std_msgs::Float32 left_cmd, right_cmd;
+    left_cmd.data = ctrl(0);
+    right_cmd.data = ctrl(1);
+    left_thruster_pub.publish(left_cmd);
+    right_thruster_pub.publish(right_cmd);
+}
+
+void mpc_normal_timer_cb(const ros::TimerEvent &event_)
+{
+    // 心跳超时检测
+    double now = ros::Time::now().toSec();
+    if (now > hbeat_target_time)
+    {
+        if (hbeat_received_)
+        {
+            // 本周期收到心跳，允许输出推进命令
+            hbeat_received_ = false;
+            // （推进器正常由后面的 cmd 发布）
+        }
+        else
+        {
+            // 丢失心跳，停用推进器
+            if (continuous_hb_received_)
+            {
+                ROS_WARN("心跳信号丢失 — 推进器已禁用！");
+                continuous_hb_received_ = false;
+            }
+            std_msgs::Float32 zero;
+            zero.data = 0.0;
+            left_thruster_pub.publish(zero);
+            right_thruster_pub.publish(zero);
+            return; // 跳过下发真实命令
+        }
+        // 设定下一个心跳检测点
+        hbeat_target_time = now + heartbeat_duration;
+    }
+
+    // 为了防止yaw角突变，首先计算一下航向角误差
+    float yaw_error = target_state(2) - observed_state(2);
+    // 将yaw_error直接累积到观测状态上，并将其作为目标状态的一部分
+    target_state(2) = observed_state(2) + yaw_error > M_PI ? yaw_error - 2 * M_PI : (yaw_error < -M_PI ? yaw_error + 2 * M_PI : yaw_error);
+    memcpy(cost_params.s_goal, target_state.data(), DYN_T::STATE_DIM * sizeof(float)); // 更新目标状态
+    cost.setParams(cost_params);                                                       // 更新代价函数参数
+    state_array x = observed_state;                                                    // 更新状态
+    static double avg_optimization_time = 0;                                           // 静态变量，用于记录平均优化时间
+    static int num_iterations = 0;                                                     // 静态变量，用于记录迭代次数
+    // chrono计时
+    auto start = std::chrono::steady_clock::now();
+    controller->computeControl(x); // 计算控制序列
+    auto end = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    num_iterations++;                                                                                     // 迭代次数加一
+    avg_optimization_time = ((avg_optimization_time * (num_iterations - 1)) + duration) / num_iterations; // 更新平均优化时间
+    // 平均优化时间加上增量
+    ROS_INFO_STREAM("平均优化时间: " << std::fixed << std::setprecision(1) << avg_optimization_time << " ms, 本次优化时间: " << std::setprecision(1) << duration << " ms");
+
+    Eigen::Vector2f ctrl = controller->getControlSeq().col(0);
+    std_msgs::Float32 left_cmd, right_cmd;
+    left_cmd.data = ctrl(0);
+    right_cmd.data = ctrl(1);
+    left_thruster_pub.publish(left_cmd);
+    right_thruster_pub.publish(right_cmd);
+}
+
+int main(int argc, char **argv)
+{
+    setlocale(LC_ALL, "");
+    ros::init(argc, argv, "mppi_controller");
+    ros::NodeHandle nh;
+    // MPC 基本参数
+    nh.param<int>("horizon", controller_params.num_timesteps_, 100); // 预测域
+    nh.param<float>("dt", controller_params.dt_, 0.1);               // 步长
+    nh.param<float>("lambda", controller_params.lambda_, 1.0);       // 温度参数
+    nh.param<float>("alpha", controller_params.alpha_, 0.0);         // 探索参数
+    nh.param<int>("max_iter", controller_params.num_iters_, 1);      // 最大迭代次数
+    nh.param<int>("dyn_block_size", DYN_BLOCK_X, 32);
+    controller_params.dynamics_rollout_dim_ = dim3(DYN_BLOCK_X, DYN_BLOCK_Y, 1);    // 动力学仿真块大小
+    controller_params.cost_rollout_dim_ = dim3(controller_params.num_iters_, 1, 1); // 代价函数仿真块大小
+
+    // 水动力参数
+    heron::HydroDynamicParams hydro_params;                                  // 水动力参数
+    float input_limit;                                                       // 控制器输入限制
+    nh.param<float>("input_limit", input_limit, 20.0);                       // 控制器输入限制
+    nh.param<float>("hydrodynamics/mass", hydro_params.mass, 38.0);          // 质量
+    nh.param<float>("hydrodynamics/Iz", hydro_params.Iz, 6.25);              // 转动惯量
+    nh.param<float>("hydrodynamics/B", hydro_params.B, 0.74);                // 桨距
+    nh.param<float>("hydrodynamics/Xu_dot", hydro_params.X_u_dot, -1.900);   // Xu_dot
+    nh.param<float>("hydrodynamics/Yv_dot", hydro_params.Y_v_dot, -29.3171); // Yv_dot
+    nh.param<float>("hydrodynamics/Nr_dot", hydro_params.N_r_dot, -4.2155);  // Nr_dot
+    nh.param<float>("hydrodynamics/Xu", hydro_params.X_u, 26.43);            // Xu
+    nh.param<float>("hydrodynamics/Yv", hydro_params.Y_v, 72.64);            // Yv
+    nh.param<float>("hydrodynamics/Nr", hydro_params.N_r, 22.96);            // Nr
+    dynamics.setDynamicsParams(hydro_params, input_limit);                   // 设置动力学参数
+
+    // 读取心跳超时参数
+    nh.param<float>("heartbeat_duration", heartbeat_duration, 0.5);
+    hbeat_target_time = ros::Time::now().toSec() + heartbeat_duration;
+
+    // 读取并设置状态权重参数
+    std::vector<float> x_weight = {10, 10, 10, 10, 10, 10};
+    nh.getParam("x_weight", x_weight);
+    memcpy(cost_params.s_coeffs, x_weight.data(), DYN_T::STATE_DIM * sizeof(float));
+    cost.setParams(cost_params); // 设置状态权重
+
+    // 读取并设置采样器参数
+    float stddev_, exponents_;
+    nh.param<float>("stddev", stddev_, 20.0); // 噪声标准差
+    nh.param<float>("exponents", exponents_, 1.0); // 输入关联指数
+    std::fill(sampler_params.std_dev, sampler_params.std_dev + DYN_T::CONTROL_DIM, stddev_);
+    std::fill(sampler_params.exponents, sampler_params.exponents + DYN_T::CONTROL_DIM, exponents_);
+    SAMPLER_T sampler(sampler_params); // 构造采样器
+
+    fb_controller = std::make_shared<FB_T>(&dynamics, controller_params.dt_);                                        // 反馈控制器实例化
+    controller = std::make_shared<CONTROLLER_T>(&dynamics, &cost, fb_controller.get(), &sampler, controller_params); // MPPI控制器实例化
+    plant = std::make_shared<PLANT_T>(controller, 1 / controller_params.dt_, 1);                                     // PLANT实例化
+
+    // 读取话题名称
+    std::string obs_topic, tgt_topic, left_cmd_topic, right_cmd_topic;
+    nh.param<std::string>("topics/observation", obs_topic, "/heron/odom");
+    nh.param<std::string>("topics/target", tgt_topic, "/heron/goal");
+    nh.param<std::string>("topics/left_thruster_cmd", left_cmd_topic, "/heron/left_thruster_cmd");
+    nh.param<std::string>("topics/right_thruster_cmd", right_cmd_topic, "/heron/right_thruster_cmd");
+
+    ROS_INFO_STREAM("MPPI控制器初始化完成!");
+    ROS_INFO_STREAM("预测域: " << controller_params.num_timesteps_ << ", 步长: " << std::fixed << std::setprecision(1) << controller_params.dt_ << ", 控制标准差: " << stddev_);
+
+    // 设置订阅
+    ros::Subscriber sub_obs = nh.subscribe(obs_topic, 10, observer_cb);
+    ros::Subscriber sub_tgt = nh.subscribe(tgt_topic, 10, target_cb);
+    left_thruster_pub = nh.advertise<std_msgs::Float32>(left_cmd_topic, 10);
+    right_thruster_pub = nh.advertise<std_msgs::Float32>(right_cmd_topic, 10);
+    // Timer for MPC at rate dt
+    ros::Timer mpc_timer = nh.createTimer(ros::Duration(controller_params.dt_), &mpc_plant_timer_cb);
+
+    // Spin to process callbacks
+    ros::spin();
+    return 0;
+}
