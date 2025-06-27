@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
+set(CMAKE_CUDA_ARCHITECTURES 89)
 project(heron_controller LANGUAGES C CXX CUDA)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
@@ -32,7 +33,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -ffast-math -march=native -flto -fvectorize -fslp-vectorize")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 -diag-suppress=20011,20012,20013,20014,20015")
 

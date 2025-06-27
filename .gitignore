@@ -5,6 +5,12 @@
 *.cubin
 *.fatbin
 
-# ROS generated folders
+# Catkin generated folders
 build
 devel
+.catkin_tools
+logs
+
+# CMake Cache
+CMakeCache.txt
+CMakeFiles

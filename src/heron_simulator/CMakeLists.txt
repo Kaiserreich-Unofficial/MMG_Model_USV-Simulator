@@ -1,8 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
 project(heron_simulator)
-set(CMAKE_C_COMPILER /usr/bin/clang)
-set(CMAKE_CXX_COMPILER /usr/bin/clang++)
-set(CMAKE_EXE_LINKER_FLAGS "-fuse-ld=lld")
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
