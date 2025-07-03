@@ -9,15 +9,14 @@ namespace heron
         this->params_ = USVDynamicsParams();
     }
 
-    void USVDynamics::setDynamicsParams(const HydroDynamicParams &hydroparams, const float &input_limit)
+    void USVDynamics::setDynamicsParams(const HydroDynamicParams &hydroparams, const float &input_limit, const float &substep)
     {
         // 设置水动力参数
         this->hydroparams_ = hydroparams;
-        // ROS_INFO_STREAM("Mass: " << this->hydroparams_.mass << " Iz: " << this->hydroparams_.Iz);
-        // ROS_INFO_STREAM("X_u_dot: " << this->hydroparams_.X_u_dot << " Y_v_dot: " << this->hydroparams_.Y_v_dot << " N_r_dot: " << this->hydroparams_.N_r_dot);
-        // ROS_INFO_STREAM("X_u: " << this->hydroparams_.X_u << " Y_v: " << this->hydroparams_.Y_v << " N_r: " << this->hydroparams_.N_r);
         // 设置输入限制
         this->input_limit_ = input_limit;
+        // 设置积分器子步长
+        this->substep_ = substep;
         // 设置惯性矩阵的逆
         Eigen::Matrix3f M_ = (Eigen::Vector3f() << this->hydroparams_.mass - this->hydroparams_.X_u_dot, this->hydroparams_.mass - this->hydroparams_.Y_v_dot, this->hydroparams_.Iz - this->hydroparams_.N_r_dot).finished().asDiagonal();
         // ROS_INFO_STREAM("惯性矩阵 M = \n" << M_.format(Eigen::IOFormat(4, 0, ", ", "\n", "[", "]")));
@@ -58,37 +57,155 @@ namespace heron
         state_der.tail(3) = this->inv_M_ * (tau - C_ * state.tail(3) - this->D_ * state.tail(3)); // 计算随体速度的导数
     }
 
-    // 连续动力学方程（CUDA设备）
-    __device__ void USVDynamics::computeDynamics(float *state, float *control, float *state_der,
+    __device__ void USVDynamics::computeDynamics(float *state,
+                                                 float *control,
+                                                 float *state_der,
                                                  float *theta_s)
     {
-        // Extract state variables
-        float psi = state[2];   // Heading Angle
-        float cpsi = cosf(psi); // Cosine of Heading Angle
-        float spsi = sinf(psi); // Sine of Heading Angle
-        float u_ = state[3];     // Surge Velocity
-        float v_ = state[4];     // Sway Velocity
-        float r_ = state[5];     // Yaw Rate
-        // Extract control inputs
-        float Tl_ = control[0]; // Left Thruster Input
-        float Tr_ = control[1]; // Right Thruster Input
+        float psi = state[2];
+        float u = state[3];
+        float v = state[4];
+        float r = state[5];
+        float cpsi = cosf(psi);
+        float spsi = sinf(psi);
 
-        // 计算随体速度导数
-        const Eigen::Vector3f nu = (Eigen::Vector3f() << u_, v_, r_).finished();
-        const Eigen::Vector3f tau = (Eigen::Vector3f() << Tl_ + Tr_, 0, 0.5 * this->hydroparams_.B * (Tl_ - Tr_)).finished(); // 构造推进力向量
-        const Eigen::Matrix3f C_ = (Eigen::Matrix3f() << 0, 0, -(this->hydroparams_.mass - this->hydroparams_.Y_v_dot) * v_,
-                                    0, 0, (this->hydroparams_.mass - this->hydroparams_.X_u_dot) * u_,
-                                    (this->hydroparams_.mass - this->hydroparams_.Y_v_dot) * v_, -(this->hydroparams_.mass - this->hydroparams_.X_u_dot) * u_, 0)
-                                       .finished(); // 构造科氏力矩阵
-        const Eigen::Vector3f nu_dot = this->inv_M_ * (tau - C_ * nu - this->D_ * nu); // 计算随体速度的导数
+        float Tl = control[0];
+        float Tr = control[1];
 
-        // Compute the dynamics
-        state_der[0] = cpsi * u_ - spsi * v_;
-        state_der[1] = spsi * u_ + cpsi * v_;
-        state_der[2] = r_;
-        state_der[3] = nu_dot(0);
-        state_der[4] = nu_dot(1);
-        state_der[5] = nu_dot(2);
+        // === 提取水动力参数 ===
+        float m = this->hydroparams_.mass;
+        float Iz = this->hydroparams_.Iz;
+        float Xu_dot = this->hydroparams_.X_u_dot;
+        float Yv_dot = this->hydroparams_.Y_v_dot;
+        float Nr_dot = this->hydroparams_.N_r_dot;
+        float Xu = this->hydroparams_.X_u;
+        float Yv = this->hydroparams_.Y_v;
+        float Nr = this->hydroparams_.N_r;
+        float B = this->hydroparams_.B;
+
+        // === 推进力 ===
+        float tau0 = Tl + Tr;
+        float tau1 = 0.0f;
+        float tau2 = 0.5f * B * (Tl - Tr);
+
+        // === 科氏项 ===
+        float C0 = -(m - Yv_dot) * v * r;
+        float C1 = (m - Xu_dot) * u * r;
+        float C2 = 0.0f;
+
+        // === 阻尼项 ===（D 是对角阵）
+        float D0 = Xu * u;
+        float D1 = Yv * v;
+        float D2 = Nr * r;
+
+        // === 等效力 ===
+        float rhs0 = tau0 - C0 - D0;
+        float rhs1 = tau1 - C1 - D1;
+        float rhs2 = tau2 - C2 - D2;
+
+        // === 计算惯性矩阵逆 ===（因为 M 是对角阵）
+        float inv_M00 = 1.0f / (m - Xu_dot);
+        float inv_M11 = 1.0f / (m - Yv_dot);
+        float inv_M22 = 1.0f / (Iz - Nr_dot);
+
+        // === nu_dot ===
+        float nu_dot_0 = inv_M00 * rhs0;
+        float nu_dot_1 = inv_M11 * rhs1;
+        float nu_dot_2 = inv_M22 * rhs2;
+
+        // === 状态导数 ===
+        state_der[0] = cpsi * u - spsi * v;
+        state_der[1] = spsi * u + cpsi * v;
+        state_der[2] = r;
+        state_der[3] = nu_dot_0;
+        state_der[4] = nu_dot_1;
+        state_der[5] = nu_dot_2;
+    }
+
+    void USVDynamics::step(Eigen::Ref<state_array> state,
+                           Eigen::Ref<state_array> next_state,
+                           Eigen::Ref<state_array> state_der,
+                           const Eigen::Ref<const control_array> &control,
+                           Eigen::Ref<output_array> output,
+                           const float t,
+                           const float dt)
+    {
+        const uint8_t M = static_cast<uint8_t>(dt / this->substep_ + 0.5f); // 四舍五入取整
+
+        state_array x = state;
+        state_array k1, k2, k3, k4;
+        state_array temp;
+
+        for (uint8_t i = 0; i < M; ++i)
+        {
+            this->computeStateDeriv(x, control, k1);
+            temp = x + 0.5f * this->substep_ * k1;
+            this->computeStateDeriv(temp, control, k2);
+            temp = x + 0.5f * this->substep_ * k2;
+            this->computeStateDeriv(temp, control, k3);
+            temp = x + this->substep_ * k3;
+            this->computeStateDeriv(temp, control, k4);
+
+            x = x + (this->substep_ / 6.0f) * (k1 + 2.0f * k2 + 2.0f * k3 + k4);
+        }
+
+        next_state = x;
+        state_der = k4; // 最后一阶段的导数
+        this->stateToOutput(next_state, output);
+    }
+
+    __device__ inline void USVDynamics::step(float *state,
+                                             float *next_state,
+                                             float *state_der,
+                                             float *control,
+                                             float *output,
+                                             float *theta_s,
+                                             const float t,
+                                             const float dt)
+    {
+        constexpr int N = this->STATE_DIM;
+        const uint8_t M = static_cast<uint8_t>(dt / this->substep_ + 0.5f); // 四舍五入取整
+
+        float x[N];
+        for (int i = 0; i < N; ++i)
+            x[i] = state[i];
+
+        float k1[N], k2[N], k3[N], k4[N];
+        float temp[N];
+
+        for (uint8_t step = 0; step < M; ++step)
+        {
+            this->computeStateDeriv(x, control, k1, theta_s);
+            __syncthreads();
+#pragma unroll
+            for (uint8_t i = 0; i < N; ++i)
+                temp[i] = x[i] + 0.5f * this->substep_ * k1[i];
+            this->computeStateDeriv(temp, control, k2, theta_s);
+            __syncthreads();
+#pragma unroll
+            for (uint8_t i = 0; i < N; ++i)
+                temp[i] = x[i] + 0.5f * this->substep_ * k2[i];
+            this->computeStateDeriv(temp, control, k3, theta_s);
+            __syncthreads();
+#pragma unroll
+            for (uint8_t i = 0; i < N; ++i)
+                temp[i] = x[i] + this->substep_ * k3[i];
+            this->computeStateDeriv(temp, control, k4, theta_s);
+            __syncthreads();
+
+#pragma unroll
+            for (uint8_t i = 0; i < N; ++i)
+                x[i] += (this->substep_ / 6.0f) * (k1[i] + 2.0f * k2[i] + 2.0f * k3[i] + k4[i]);
+        }
+#pragma unroll
+        for (uint8_t i = 0; i < N; ++i)
+        {
+            next_state[i] = x[i];
+            state_der[i] = k4[i];
+        }
+
+        __syncthreads();
+        this->stateToOutput(next_state, output);
     }
 
     // 从输入数据映射到状态

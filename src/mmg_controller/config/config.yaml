@@ -1,14 +1,14 @@
 num_rollouts: 8192 # 前向采样次数
 dyn_block_size: 32 # 动力学模型块大小
-horizon: 60 # 单位：步
+horizon: 100 # 单位：步
 dt: 0.1 # 单位：秒
-x_weight : [10, 10, 100, 0.1, 0.1, 0.1] # 状态变量权重
-lambda : 1.0 # 正则化/学习率参数
-alpha : 0.0 # 探索参数
+x_weight : [110, 110, 10, 1, 0.1, 10] # 状态变量权重
+lambda : 0.5 # 正则化/学习率参数
+alpha : 0.1 # 探索参数
 iter: 4 # 滚动优化迭代次数
 heartbeat_duration: 0.1 # 控制器心跳周期
-stddev: 20.0 # 控制器输出噪声标准差
-exponents: 0.5 # 控制器输出噪声指数
+stddev: 10.0 # 控制器输出噪声标准差
+exponents: 1.0 # 控制器输出噪声指数
 input_limit: 20.0 # 控制器输入限制
 dynamics_test: # 以实际动力学为准
   left_input: 0 # 左推力输入
@@ -31,8 +31,8 @@ topics:
 simulation:
   time_total: 300 # 仿真总时长
   traj_type: "circle" # 轨迹类型
-  radius: 10 # 圆轨迹半径
-  omega: 0.1 # 圆轨迹角速度
+  radius: 8 # 圆轨迹半径
+  omega: 0.15 # 圆轨迹角速度
   x_goal: 50 # 点轨迹目标x坐标
   y_goal: 50 # 点轨迹目标y坐标
   psi_goal: 3.14159 # 点轨迹目标航向

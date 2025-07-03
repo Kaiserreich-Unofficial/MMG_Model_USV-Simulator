@@ -9,7 +9,7 @@
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
 #include <mppi/controllers/Tube-MPPI/tube_mppi_controller.cuh>
 #include <mppi/cost_functions/quadratic_cost/quadratic_cost.cuh>
-#include <mppi/sampling_distributions/nln/nln.cuh>
+#include <mppi/sampling_distributions/colored_noise/colored_noise.cuh>
 #include <mppi/feedback_controllers/DDP/ddp.cuh>
 
 // STD includes
@@ -28,7 +28,7 @@ using DYN_T = heron::USVDynamics;
 using COST_T = QuadraticCost<DYN_T>;
 using COST_PARAM_T = QuadraticCostTrajectoryParams<DYN_T>;
 using FB_T = DDPFeedback<DYN_T, 100>;
-using SAMPLER_T = mppi::sampling_distributions::NLNDistribution<DYN_T::DYN_PARAMS_T>;
+using SAMPLER_T = mppi::sampling_distributions::ColoredNoiseDistribution<DYN_T::DYN_PARAMS_T>;
 using CONTROLLER_T = VanillaMPPIController<DYN_T, COST_T, FB_T, 100, 8192, SAMPLER_T>;
 using CONTROLLER_PARAMS_T = CONTROLLER_T::TEMPLATED_PARAMS;
 using PLANT_T = heron::USVMPCPlant<CONTROLLER_T>;
@@ -127,9 +127,9 @@ void mpc_timer_cb(const ros::TimerEvent &event_)
     plant->updateState(observed_state, ros::Time::now().toSec());
     static std::atomic<bool> alive(true); // 优化线程的存活标志
     plant->runControlIteration(&alive);
-
+    auto fe_stat = controller->getFreeEnergyStatistics(); // 获取自由能统计信息
     ROS_INFO_STREAM("平均优化时间: " << std::fixed << std::setprecision(1) << plant->getAvgOptimizationTime() << " ms, 上次优化时间: " << std::setprecision(1) << plant->getLastOptimizationTime() << " ms");
-
+    ROS_INFO_STREAM("Free Energy: " << std::fixed << std::setprecision(3) << fe_stat.real_sys.freeEnergyMean << " +- " << fe_stat.real_sys.freeEnergyVariance); // 打印优化结果
     Eigen::Vector2f ctrl = controller->getControlSeq().col(0);
     std_msgs::Float32 left_cmd, right_cmd;
     left_cmd.data = ctrl(0);
@@ -150,13 +150,14 @@ int main(int argc, char **argv)
     nh.param<float>("alpha", controller_params.alpha_, 0.0);         // 探索参数
     nh.param<int>("max_iter", controller_params.num_iters_, 1);      // 最大迭代次数
     nh.param<int>("dyn_block_size", DYN_BLOCK_X, 32);
-    controller_params.dynamics_rollout_dim_ = dim3(DYN_BLOCK_X, DYN_BLOCK_Y, 1);    // 动力学仿真块大小
-    controller_params.cost_rollout_dim_ = dim3(DYN_BLOCK_X, DYN_BLOCK_Y, 1); // 代价函数仿真块大小
+    controller_params.dynamics_rollout_dim_ = dim3(DYN_BLOCK_X, DYN_BLOCK_Y, 1); // 动力学仿真块大小
+    controller_params.cost_rollout_dim_ = dim3(DYN_BLOCK_X, DYN_BLOCK_Y, 1);     // 代价函数仿真块大小
 
     // 水动力参数
     heron::HydroDynamicParams hydro_params;                                  // 水动力参数
-    float input_limit;                                                       // 控制器输入限制
+    float input_limit, substep;                                              // 控制器输入限制 & 积分器子步长
     nh.param<float>("input_limit", input_limit, 20.0);                       // 控制器输入限制
+    nh.param<float>("substep", substep, 0.01);                               // 积分器子步长
     nh.param<float>("hydrodynamics/mass", hydro_params.mass, 38.0);          // 质量
     nh.param<float>("hydrodynamics/Iz", hydro_params.Iz, 6.25);              // 转动惯量
     nh.param<float>("hydrodynamics/B", hydro_params.B, 0.74);                // 桨距
@@ -166,7 +167,8 @@ int main(int argc, char **argv)
     nh.param<float>("hydrodynamics/Xu", hydro_params.X_u, 26.43);            // Xu
     nh.param<float>("hydrodynamics/Yv", hydro_params.Y_v, 72.64);            // Yv
     nh.param<float>("hydrodynamics/Nr", hydro_params.N_r, 22.96);            // Nr
-    dynamics.setDynamicsParams(hydro_params, input_limit);                   // 设置动力学参数
+
+    dynamics.setDynamicsParams(hydro_params, input_limit, substep); // 设置动力学参数
 
     // 读取心跳超时参数
     nh.param<float>("heartbeat_duration", heartbeat_duration, 0.5);
@@ -179,12 +181,12 @@ int main(int argc, char **argv)
     cost.setParams(cost_params); // 设置状态权重
 
     // 读取并设置采样器参数
-    float stddev_;
-    SAMPLER_T::SAMPLING_PARAMS_T sampler_params; // sampler需要在sampler_params构造好后再传入sampler中
-    nh.param<float>("stddev", stddev_, 20.0); // 噪声标准差
-    // nh.param<float>("exponents", exponents_, 1.0); // 输入关联指数
+    float stddev_, exponents_;
+    SAMPLER_T::SAMPLING_PARAMS_T sampler_params;   // sampler需要在sampler_params构造好后再传入sampler中
+    nh.param<float>("stddev", stddev_, 20.0);      // 噪声标准差
+    nh.param<float>("exponents", exponents_, 1.0); // 输入关联指数
     std::fill(sampler_params.std_dev, sampler_params.std_dev + DYN_T::CONTROL_DIM, stddev_);
-    // std::fill(sampler_params.exponents, sampler_params.exponents + DYN_T::CONTROL_DIM, exponents_);
+    std::fill(sampler_params.exponents, sampler_params.exponents + DYN_T::CONTROL_DIM, exponents_);
     SAMPLER_T sampler(sampler_params); // 构造采样器
 
     fb_controller = std::make_shared<FB_T>(&dynamics, controller_params.dt_);                                        // 反馈控制器实例化
@@ -199,7 +201,7 @@ int main(int argc, char **argv)
     nh.param<std::string>("topics/right_thruster_cmd", right_cmd_topic, "/heron/right_thruster_cmd");
 
     ROS_INFO_STREAM("MPPI控制器初始化完成!");
-    ROS_INFO_STREAM("预测域: " << controller_params.num_timesteps_ << ", 步长: " << std::fixed << std::setprecision(1) << controller_params.dt_ << ", 控制标准差: " << stddev_);
+    ROS_INFO_STREAM("预测域: " << controller_params.num_timesteps_ << ", 步长: " << std::fixed << std::setprecision(3) << controller_params.dt_ << ", 积分器子步长: " << substep << ", 控制标准差: " << stddev_);
 
     // 设置订阅
     ros::Subscriber sub_obs = nh.subscribe(obs_topic, 10, observer_cb);

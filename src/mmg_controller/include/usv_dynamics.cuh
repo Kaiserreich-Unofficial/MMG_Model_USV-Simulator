@@ -63,7 +63,7 @@ namespace heron
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
         USVDynamics(cudaStream_t stream = nullptr);
 
-        void setDynamicsParams(const HydroDynamicParams &hydroparams, const float &input_limit);
+        void setDynamicsParams(const HydroDynamicParams &hydroparams, const float &input_limit, const float &substep);
 
         std::string getDynamicsModelName() const override
         {
@@ -78,6 +78,12 @@ namespace heron
 
         __device__ void computeDynamics(float *state, float *control, float *state_der, float *theta = nullptr);
 
+        void step(Eigen::Ref<state_array> state, Eigen::Ref<state_array> next_state, Eigen::Ref<state_array> state_der,
+                  const Eigen::Ref<const control_array> &control, Eigen::Ref<output_array> output, const float t,
+                  const float dt);
+
+        __device__ inline void step(float *state, float *next_state, float *state_der, float *control, float *output, float *theta_s, const float t, const float dt);
+
         state_array stateFromMap(const std::map<std::string, float> &map);
 
         // 施加控制约束
@@ -88,7 +94,8 @@ namespace heron
         // 自定义参数
         HydroDynamicParams hydroparams_; // 水动力参数
         float input_limit_;              // 输入限制
-        Eigen::Matrix3f inv_M_;              // 惯量矩阵
+        float substep_;                  // 子步长
+        Eigen::Matrix3f inv_M_;          // 惯量矩阵
         Eigen::Matrix3f D_;              // 阻尼矩阵
     };
 }

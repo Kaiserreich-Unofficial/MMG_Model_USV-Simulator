@@ -100,9 +100,11 @@ int main(int argc, char *argv[])
 
     // 水动力参数
     heron::HydroDynamicParams hydro_params;                                  // 水动力参数
-    float input_limit;                                                       // 控制器输入限制
+    float input_limit, substep;                                              // 控制器输入限制 & 积分器子步长
     nh.param<float>("input_limit", input_limit, 20.0);                       // 控制器输入限制
-    nh.param<float>("hydrodynamics/mass", hydro_params.mass, 38);            // 质量
+    nh.param<float>("substep", substep, 0.01);                               // 积分器子步长
+    nh.param<float>("hydrodynamics/mass", hydro_params.mass, 38.0);          // 质量
+    nh.param<float>("hydrodynamics/Iz", hydro_params.Iz, 6.25);              // 转动惯量
     nh.param<float>("hydrodynamics/B", hydro_params.B, 0.74);                // 桨距
     nh.param<float>("hydrodynamics/Xu_dot", hydro_params.X_u_dot, -1.900);   // Xu_dot
     nh.param<float>("hydrodynamics/Yv_dot", hydro_params.Y_v_dot, -29.3171); // Yv_dot
@@ -110,8 +112,8 @@ int main(int argc, char *argv[])
     nh.param<float>("hydrodynamics/Xu", hydro_params.X_u, 26.43);            // Xu
     nh.param<float>("hydrodynamics/Yv", hydro_params.Y_v, 72.64);            // Yv
     nh.param<float>("hydrodynamics/Nr", hydro_params.N_r, 22.96);            // Nr
-    dynamics = make_shared<DYN_T>();
-    dynamics->setDynamicsParams(hydro_params, input_limit);                   // 设置动力学参数
+
+    dynamics->setDynamicsParams(hydro_params, input_limit, substep); // 设置动力学参数
 
     // 读取话题名称
     std::string obs_topic, tgt_topic, left_thrust_topic, right_thrust_topic;

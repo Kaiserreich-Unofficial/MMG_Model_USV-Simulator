@@ -4,6 +4,7 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion
 from tf.transformations import quaternion_from_euler
 from functools import partial
+from time import sleep
 
 class TrajectoryGenerator:
     def __init__(self):
@@ -147,6 +148,7 @@ class TrajectoryGenerator:
         return
 
 if __name__ == '__main__':
+    sleep(4)
     try:
         generator = TrajectoryGenerator()
         generator.run()

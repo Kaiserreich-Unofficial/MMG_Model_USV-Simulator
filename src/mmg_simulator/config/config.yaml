@@ -1,4 +1,5 @@
 dt: 0.1
+substep: 0.05
 integrator_type: rk4
 input_limit: 20.0
 hydrodynamics:
