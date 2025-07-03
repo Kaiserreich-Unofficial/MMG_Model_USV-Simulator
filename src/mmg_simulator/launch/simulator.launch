@@ -1,0 +1,9 @@
+<launch>
+    <!-- 加载整个 YAML 文件 -->
+    <rosparam command="load" file="$(find mmg_simulator)/config/config.yaml" />
+
+    <!-- 启动节点 -->
+    <node name="simulator" pkg="mmg_simulator" type="simulator" output="screen" />
+    <!-- 启动 RViz -->
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find mmg_simulator)/rviz/visualize.rviz"/>
+</launch>

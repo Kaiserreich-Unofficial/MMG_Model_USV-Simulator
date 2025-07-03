@@ -33,7 +33,7 @@ void odomCallback(const ros::TimerEvent &event)
 int main(int argc, char **argv)
 {
     setlocale(LC_ALL, ""); // Set locale to UTF-8
-    ros::init(argc, argv, "heron_simulator");
+    ros::init(argc, argv, "mmg_simulator");
     ros::NodeHandle nh;
 
     static std::string integrator_type;     // 积分器类型

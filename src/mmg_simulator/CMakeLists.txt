@@ -1,22 +1,13 @@
 cmake_minimum_required(VERSION 3.8)
-set(CMAKE_CUDA_ARCHITECTURES 89)
-project(heron_controller LANGUAGES C CXX CUDA)
+project(mmg_simulator)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
+add_compile_options(-std=c++17 -O3 -ffast-math -flto -fvectorize -fslp-vectorize -fopenmp -mllvm -polly)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-include(FetchContent)
-
-FetchContent_Declare(
-  MPPI-Generic
-  GIT_REPOSITORY https://github.com/Kaiserreich-Unofficial/MPPI-Generic.git
-  GIT_TAG main
-)
-FetchContent_MakeAvailable(MPPI-Generic)
-
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   roscpp
@@ -28,13 +19,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 find_package(Eigen3 REQUIRED)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -ffast-math -march=native -flto -fvectorize -fslp-vectorize")
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 -diag-suppress=20011,20012,20013,20014,20015")
+find_package(Boost REQUIRED COMPONENTS system)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -123,7 +108,7 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 -diag-suppress=20011,20012,20013,2
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES heron_controller
+#  LIBRARIES mmg_simulator
 #  CATKIN_DEPENDS geometry_msgs roscpp rospy std_msgs tf
 #  DEPENDS system_lib
 )
@@ -141,7 +126,7 @@ include
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/heron_controller.cpp
+#   src/${PROJECT_NAME}/mmg_simulator.cpp
 # )
 
 ## Add cmake target dependencies of the library
@@ -152,9 +137,8 @@ include
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-# add_executable(${PROJECT_NAME}_node src/heron_controller_node.cpp)
-add_executable(mppi_controller src/mppi_controller.cu)
-add_executable(dynamics_test src/dynamics_test.cu)
+# add_executable(${PROJECT_NAME}_node src/mmg_simulator_node.cpp)
+add_executable(simulator src/simulator.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -165,21 +149,14 @@ add_executable(dynamics_test src/dynamics_test.cu)
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_dependencies(mppi_controller ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(simulator ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
 # target_link_libraries(${PROJECT_NAME}_node
 #   ${catkin_LIBRARIES}
 # )
-target_link_libraries(mppi_controller
+target_link_libraries(simulator
   ${catkin_LIBRARIES}
-  MPPI::MPPI
-  Eigen3::Eigen
-)
-
-target_link_libraries(dynamics_test
-  ${catkin_LIBRARIES}
-  MPPI::MPPI
   Eigen3::Eigen
 )
 
@@ -196,10 +173,6 @@ target_link_libraries(dynamics_test
 #   scripts/my_python_script
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
-catkin_install_python(PROGRAMS
-  scripts/traj_generator.py
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
@@ -234,7 +207,7 @@ catkin_install_python(PROGRAMS
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_heron_controller.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_mmg_simulator.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()
