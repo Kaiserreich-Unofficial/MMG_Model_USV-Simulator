@@ -37,20 +37,20 @@ namespace Simulator
         // 析构函数
         ~Dynamics() = default;
         // 计算离散动力学
-        VectorSf Discrete_Dynamics(const VectorSf &state, const VectorIf &input, const float &dt);
+        VectorSf Discrete_Dynamics(const VectorSf &state, const VectorIf &input, const float &dt, const Eigen::Vector3f &extforce);
 
     private:
-        using IntegratorFunc = VectorSf (Dynamics::*)(const VectorSf &, const VectorIf &, const float &); // 积分器函数指针类型
-        uint8_t INPUT_DIM;                                                                                // 输入维度
-        DynamicParams params_;                                                                            // 水动力参数
-        float input_limit_;                                                                               // 输入限制
-        Eigen::Matrix3f M_;                                                                               // 惯量矩阵
-        Eigen::Matrix3f D_;                                                                               // 阻尼矩阵
-        IntegratorFunc integrator_func_;                                                                  // 积分器函数指针
-        inline VectorSf Continuous_Dynamics(const VectorSf &state, const VectorIf &input);
-        inline VectorSf rk4_step(const VectorSf &state, const VectorIf &input, const float &dt);
-        inline VectorSf rk3_step(const VectorSf &state, const VectorIf &input, const float &dt);
-        inline VectorSf euler_step(const VectorSf &state, const VectorIf &input, const float &dt);
+        using IntegratorFunc = VectorSf (Dynamics::*)(const VectorSf &, const VectorIf &, const float &, const Eigen::Vector3f &); // 积分器函数指针类型
+        uint8_t INPUT_DIM;                                                                                                         // 输入维度
+        DynamicParams params_;                                                                                                     // 水动力参数
+        float input_limit_;                                                                                                        // 输入限制
+        Eigen::Matrix3f M_;                                                                                                        // 惯量矩阵
+        Eigen::Matrix3f D_;                                                                                                        // 阻尼矩阵
+        IntegratorFunc integrator_func_;                                                                                           // 积分器函数指针
+        inline VectorSf Continuous_Dynamics(const VectorSf &state, const VectorIf &input, const Eigen::Vector3f &extforce);
+        inline VectorSf rk4_step(const VectorSf &state, const VectorIf &input, const float &dt, const Eigen::Vector3f &extforce);
+        inline VectorSf rk3_step(const VectorSf &state, const VectorIf &input, const float &dt, const Eigen::Vector3f &extforce);
+        inline VectorSf euler_step(const VectorSf &state, const VectorIf &input, const float &dt, const Eigen::Vector3f &extforce);
     };
 
     inline Dynamics::Dynamics(const DynamicParams &dynamic_params, const std::string &integrator_type, const float &input_limit)
@@ -85,7 +85,7 @@ namespace Simulator
     }
 
     // 计算连续动力学
-    inline VectorSf Dynamics::Continuous_Dynamics(const VectorSf &state, const VectorIf &input)
+    inline VectorSf Dynamics::Continuous_Dynamics(const VectorSf &state, const VectorIf &input, const Eigen::Vector3f &extforce)
     {
         const float psi_ = state(2);
         const float u_ = state(3);
@@ -97,11 +97,11 @@ namespace Simulator
         const float cpsi_ = cosf(psi_);
         const float spsi_ = sinf(psi_);
 
-        const Eigen::Vector3f tau = (Eigen::Vector3f() << Tl_ + Tr_, 0, 0.5 * this->params_.B * (Tl_ - Tr_)).finished(); // 构造推进力向量
+        const Eigen::Vector3f tau = (Eigen::Vector3f() << Tl_ + Tr_, 0, 0.5 * this->params_.B * (Tl_ - Tr_)).finished() + extforce; // 构造力向量
         const Eigen::Matrix3f C_ = (Eigen::Matrix3f() << 0, 0, -(this->params_.mass - this->params_.Y_v_dot) * v_,
                                     0, 0, (this->params_.mass - this->params_.X_u_dot) * u_,
                                     (this->params_.mass - this->params_.Y_v_dot) * v_, -(this->params_.mass - this->params_.X_u_dot) * u_, 0)
-                                       .finished();                                                // 构造科氏力矩阵
+                                       .finished();                                                                // 构造科氏力矩阵
         const Eigen::Vector3f nu_dot = this->M_.inverse() * (tau - C_ * state.tail(3) - this->D_ * state.tail(3)); // 计算随体速度的导数
         // 计算位置和姿态的导数
         const float x_dot = u_ * cpsi_ - v_ * spsi_;
@@ -111,32 +111,32 @@ namespace Simulator
         return (VectorSf() << x_dot, y_dot, psi_dot, nu_dot(0), nu_dot(1), nu_dot(2)).finished();
     }
     // 四阶龙格-库塔法
-    inline VectorSf Dynamics::rk4_step(const VectorSf &state, const VectorIf &input, const float &dt)
+    inline VectorSf Dynamics::rk4_step(const VectorSf &state, const VectorIf &input, const float &dt, const Eigen::Vector3f &extforce)
     {
-        const VectorSf k1 = this->Continuous_Dynamics(state, input) * dt;
-        const VectorSf k2 = this->Continuous_Dynamics(state + k1 / 2, input) * dt;
-        const VectorSf k3 = this->Continuous_Dynamics(state + k2 / 2, input) * dt;
-        const VectorSf k4 = this->Continuous_Dynamics(state + k3, input) * dt;
+        const VectorSf k1 = this->Continuous_Dynamics(state, input, extforce) * dt;
+        const VectorSf k2 = this->Continuous_Dynamics(state + k1 / 2, input, extforce) * dt;
+        const VectorSf k3 = this->Continuous_Dynamics(state + k2 / 2, input, extforce) * dt;
+        const VectorSf k4 = this->Continuous_Dynamics(state + k3, input, extforce) * dt;
         return state + (k1 + 2 * k2 + 2 * k3 + k4) / 6;
     }
 
     // 三阶龙格-库塔法
-    inline VectorSf Dynamics::rk3_step(const VectorSf &state, const VectorIf &input, const float &dt)
+    inline VectorSf Dynamics::rk3_step(const VectorSf &state, const VectorIf &input, const float &dt, const Eigen::Vector3f &extforce)
     {
-        const VectorSf k1 = this->Continuous_Dynamics(state, input) * dt;
-        const VectorSf k2 = this->Continuous_Dynamics(state + k1 / 2, input) * dt;
-        const VectorSf k3 = this->Continuous_Dynamics(state + k2, input) * dt;
+        const VectorSf k1 = this->Continuous_Dynamics(state, input, extforce) * dt;
+        const VectorSf k2 = this->Continuous_Dynamics(state + k1 / 2, input, extforce) * dt;
+        const VectorSf k3 = this->Continuous_Dynamics(state + k2, input, extforce) * dt;
         return state + (k1 + 4 * k2 + k3) / 6;
     }
 
     // 前向欧拉法
-    inline VectorSf Dynamics::euler_step(const VectorSf &state, const VectorIf &input, const float &dt)
+    inline VectorSf Dynamics::euler_step(const VectorSf &state, const VectorIf &input, const float &dt, const Eigen::Vector3f &extforce)
     {
-        return state + this->Continuous_Dynamics(state, input) * dt;
+        return state + this->Continuous_Dynamics(state, input, extforce) * dt;
     }
 
     // 根据输入的状态、输入和离散时间间隔，计算离散动态
-    VectorSf Dynamics::Discrete_Dynamics(const VectorSf &state, const VectorIf &input, const float &dt)
+    VectorSf Dynamics::Discrete_Dynamics(const VectorSf &state, const VectorIf &input, const float &dt, const Eigen::Vector3f &extforce)
     {
         if ((input.array() > this->input_limit_).any())
             ROS_WARN_THROTTLE(1.0, "输入中存在超过最大限制的值，已裁剪至 %.3f", this->input_limit_);
@@ -144,7 +144,7 @@ namespace Simulator
             ROS_WARN_THROTTLE(1.0, "输入中存在低于最小限制的值，已裁剪至 %.3f", -this->input_limit_);
 
         // 调用积分器函数，计算离散动态
-        return (this->*integrator_func_)(state, input.array().min(this->input_limit_).max(-this->input_limit_), dt);
+        return (this->*integrator_func_)(state, input.array().min(this->input_limit_).max(-this->input_limit_), dt, extforce);
     }
 }
 

@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.8)
-project(mmg_simulator)
+project(mmg_simulator LANGUAGES C CXX CUDA)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
-add_compile_options(-std=c++17 -O3 -ffast-math -flto -fvectorize -fslp-vectorize -fopenmp -mllvm -polly)
+add_compile_options(-O3 -ffast-math -flto -fvectorize -fslp-vectorize -fopenmp -mllvm -polly)
+
+link_directories(/usr/local/cuda/lib64)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -20,6 +22,12 @@ find_package(catkin REQUIRED COMPONENTS
 # find_package(Boost REQUIRED COMPONENTS system)
 find_package(Eigen3 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
+find_package(CUDA REQUIRED)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -122,6 +130,15 @@ catkin_package(
 include_directories(
 include
   ${catkin_INCLUDE_DIRS}
+  ${CUDA_INCLUDE_DIRS}
+)
+
+cuda_add_library(cuda_waveforce
+    include/extwave.cu
+)
+
+set_target_properties(cuda_waveforce PROPERTIES
+    CUDA_ARCHITECTURES "89"
 )
 
 ## Declare a C++ library
@@ -155,8 +172,15 @@ add_dependencies(simulator ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED
 # target_link_libraries(${PROJECT_NAME}_node
 #   ${catkin_LIBRARIES}
 # )
+target_link_libraries(cuda_waveforce
+  ${catkin_LIBRARIES}
+  cufft
+  Eigen3::Eigen
+)
+
 target_link_libraries(simulator
   ${catkin_LIBRARIES}
+  cuda_waveforce
   Eigen3::Eigen
 )
 
