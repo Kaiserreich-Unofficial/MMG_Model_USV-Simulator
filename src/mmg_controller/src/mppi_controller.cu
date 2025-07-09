@@ -1,3 +1,10 @@
+#define ANSI_RED "\033[31m"
+#define ANSI_GREEN "\033[32m"
+#define ANSI_YELLOW "\033[33m"
+#define ANSI_BLUE "\033[34m"
+#define ANSI_PURPLE "\033[35m"
+#define ANSI_CYAN "\033[36m"
+
 // ROS
 #include <ros/ros.h>
 #include <geometry_msgs/Twist.h>
@@ -7,7 +14,7 @@
 
 // MPPI includes
 #include <mppi/controllers/MPPI/mppi_controller.cuh>
-#include <mppi/controllers/Tube-MPPI/tube_mppi_controller.cuh>
+#include <mppi/controllers/ColoredMPPI/colored_mppi_controller.cuh>
 #include <mppi/cost_functions/quadratic_cost/quadratic_cost.cuh>
 #include <mppi/sampling_distributions/colored_noise/colored_noise.cuh>
 #include <mppi/feedback_controllers/DDP/ddp.cuh>
@@ -29,7 +36,7 @@ using COST_T = QuadraticCost<DYN_T>;
 using COST_PARAM_T = QuadraticCostTrajectoryParams<DYN_T>;
 using FB_T = DDPFeedback<DYN_T, 100>;
 using SAMPLER_T = mppi::sampling_distributions::ColoredNoiseDistribution<DYN_T::DYN_PARAMS_T>;
-using CONTROLLER_T = VanillaMPPIController<DYN_T, COST_T, FB_T, 100, 8192, SAMPLER_T>;
+using CONTROLLER_T = ColoredMPPIController<DYN_T, COST_T, FB_T, 100, 8192, SAMPLER_T>;
 using CONTROLLER_PARAMS_T = CONTROLLER_T::TEMPLATED_PARAMS;
 using PLANT_T = heron::USVMPCPlant<CONTROLLER_T>;
 using state_array = DYN_T::state_array;
@@ -47,6 +54,10 @@ CONTROLLER_PARAMS_T controller_params;
 std::shared_ptr<CONTROLLER_T> controller; // mpc controller
 std::shared_ptr<FB_T> fb_controller;      // feedback controller
 std::shared_ptr<PLANT_T> plant;           // mpc plant
+std::shared_ptr<SAMPLER_T> sampler;       // mppi sampler
+
+float input_limit;                // 控制指令限制
+bool use_adaptive_stddev = false; // 是否使用自适应标准差
 
 // 心跳保活机制
 float heartbeat_duration;
@@ -126,10 +137,21 @@ void mpc_timer_cb(const ros::TimerEvent &event_)
     plant->setCostParams(cost_params);
     plant->updateState(observed_state, ros::Time::now().toSec());
     static std::atomic<bool> alive(true); // 优化线程的存活标志
+    static float last_femean;             // 上一次优化得到的自由能
     plant->runControlIteration(&alive);
     auto fe_stat = controller->getFreeEnergyStatistics(); // 获取自由能统计信息
-    ROS_INFO_STREAM("平均优化时间: " << std::fixed << std::setprecision(1) << plant->getAvgOptimizationTime() << " ms, 上次优化时间: " << std::setprecision(1) << plant->getLastOptimizationTime() << " ms");
-    ROS_INFO_STREAM("Free Energy: " << std::fixed << std::setprecision(3) << fe_stat.real_sys.freeEnergyMean << " +- " << fe_stat.real_sys.freeEnergyVariance); // 打印优化结果
+    ROS_INFO_STREAM(ANSI_GREEN << "平均优化时间: " << std::fixed << std::setprecision(2) << plant->getAvgOptimizationTime() << " ms, 上次优化时间: " << std::setprecision(1) << plant->getLastOptimizationTime() << " ms");
+    ROS_INFO_STREAM(ANSI_CYAN << "Free Energy: " << std::fixed << std::setprecision(3) << fe_stat.real_sys.freeEnergyMean << " +- " << fe_stat.real_sys.freeEnergyVariance); // 打印优化结果
+    if (use_adaptive_stddev)                                                                                                                                    // 如果使用自适应标准差，则根据自由能变化更新标准差
+    {
+        auto sampler_params = sampler->getParams();
+        // 将自由能变化从正负无穷映射到[-1, 1]，之后计算权重更新标准差
+        float stddev_weight = std::clamp(1.0f + .1f * tanhf(fe_stat.real_sys.freeEnergyMean - last_femean), .5f, 1.1f);
+        sampler_params.std_dev[0] *= stddev_weight;
+        sampler_params.std_dev[1] *= stddev_weight;
+        sampler->setParams(sampler_params);
+        last_femean = fe_stat.real_sys.freeEnergyMean;
+    }
     Eigen::Vector2f ctrl = controller->getControlSeq().col(0);
     std_msgs::Float32 left_cmd, right_cmd;
     left_cmd.data = ctrl(0);
@@ -155,9 +177,10 @@ int main(int argc, char **argv)
 
     // 水动力参数
     heron::HydroDynamicParams hydro_params;                                  // 水动力参数
-    float input_limit, substep;                                              // 控制器输入限制 & 积分器子步长
+    float substep;                                                           // 积分器子步长
     nh.param<float>("input_limit", input_limit, 20.0);                       // 控制器输入限制
     nh.param<float>("substep", substep, 0.01);                               // 积分器子步长
+    nh.param<bool>("use_adaptive_stddev", use_adaptive_stddev, false);       // 是否使用自适应标准差
     nh.param<float>("hydrodynamics/mass", hydro_params.mass, 38.0);          // 质量
     nh.param<float>("hydrodynamics/Iz", hydro_params.Iz, 6.25);              // 转动惯量
     nh.param<float>("hydrodynamics/B", hydro_params.B, 0.74);                // 桨距
@@ -187,11 +210,11 @@ int main(int argc, char **argv)
     nh.param<float>("exponents", exponents_, 1.0); // 输入关联指数
     std::fill(sampler_params.std_dev, sampler_params.std_dev + DYN_T::CONTROL_DIM, stddev_);
     std::fill(sampler_params.exponents, sampler_params.exponents + DYN_T::CONTROL_DIM, exponents_);
-    SAMPLER_T sampler(sampler_params); // 构造采样器
+    sampler = std::make_shared<SAMPLER_T>(sampler_params); // 采样器实例化
 
-    fb_controller = std::make_shared<FB_T>(&dynamics, controller_params.dt_);                                        // 反馈控制器实例化
-    controller = std::make_shared<CONTROLLER_T>(&dynamics, &cost, fb_controller.get(), &sampler, controller_params); // MPPI控制器实例化
-    plant = std::make_shared<PLANT_T>(controller, 1 / controller_params.dt_, 1);                                     // PLANT实例化
+    fb_controller = std::make_shared<FB_T>(&dynamics, controller_params.dt_);                                             // 反馈控制器实例化
+    controller = std::make_shared<CONTROLLER_T>(&dynamics, &cost, fb_controller.get(), sampler.get(), controller_params); // MPPI控制器实例化
+    plant = std::make_shared<PLANT_T>(controller, 1 / controller_params.dt_, 1);                                          // PLANT实例化
 
     // 读取话题名称
     std::string obs_topic, tgt_topic, left_cmd_topic, right_cmd_topic;
@@ -200,8 +223,8 @@ int main(int argc, char **argv)
     nh.param<std::string>("topics/left_thruster_cmd", left_cmd_topic, "/heron/left_thruster_cmd");
     nh.param<std::string>("topics/right_thruster_cmd", right_cmd_topic, "/heron/right_thruster_cmd");
 
-    ROS_INFO_STREAM("MPPI控制器初始化完成!");
-    ROS_INFO_STREAM("预测域: " << controller_params.num_timesteps_ << ", 步长: " << std::fixed << std::setprecision(3) << controller_params.dt_ << ", 积分器子步长: " << substep << ", 控制标准差: " << stddev_);
+    ROS_INFO_STREAM(ANSI_PURPLE << "MPPI控制器初始化完成!");
+    ROS_INFO_STREAM(ANSI_PURPLE << "预测域: " << controller_params.num_timesteps_ << ", 步长: " << std::fixed << std::setprecision(3) << controller_params.dt_ << ", 积分器子步长: " << substep << ", 控制标准差: " << stddev_ << ", 自适应标准差: " << std::boolalpha << use_adaptive_stddev);
 
     // 设置订阅
     ros::Subscriber sub_obs = nh.subscribe(obs_topic, 10, observer_cb);
