@@ -9,6 +9,7 @@
 #include <ros/ros.h>
 #include <geometry_msgs/Twist.h>
 #include <nav_msgs/Odometry.h>
+#include <nav_msgs/Path.h>
 #include <std_msgs/Float32.h>
 #include <tf/transform_datatypes.h>
 
@@ -68,6 +69,31 @@ bool continuous_hb_received_ = false; // 用于首次恢复/丢失时打印日�
 // ROS控制指令发布者
 ros::Publisher left_thruster_pub;
 ros::Publisher right_thruster_pub;
+ros::Publisher target_traj_pub;
+
+void publishTargetPath(
+    const CONTROLLER_T::state_trajectory &traj,
+    const std::string &frame_id = "odom")
+{
+    nav_msgs::Path path_msg;
+    path_msg.header.stamp = ros::Time::now();
+    path_msg.header.frame_id = frame_id;
+
+#pragma omp parallel for
+    for (int i = 0; i < traj.cols(); ++i)
+    {
+        geometry_msgs::PoseStamped pose;
+        pose.header = path_msg.header;
+        pose.pose.position.x = traj(0, i);
+        pose.pose.position.y = traj(1, i);
+        pose.pose.position.z = 0.0;
+        pose.pose.orientation = tf::createQuaternionMsgFromYaw(traj(2, i));
+
+        path_msg.poses.push_back(pose);
+    }
+
+    target_traj_pub.publish(path_msg);
+}
 
 // Observer callback
 void observer_cb(const nav_msgs::Odometry::ConstPtr &state)
@@ -145,6 +171,9 @@ void mpc_timer_cb(const ros::TimerEvent &event_)
     ROS_INFO_STREAM(ANSI_GREEN << "平均优化时间: " << std::fixed << std::setprecision(2) << plant->getAvgOptimizationTime() << " ms, 上次优化时间: " << std::setprecision(1) << plant->getLastOptimizationTime() << " ms");
     ROS_INFO_STREAM(ANSI_CYAN << "Free Energy: " << std::fixed << std::setprecision(3) << fe_stat.real_sys.freeEnergyMean << " +- " << fe_stat.real_sys.freeEnergyVariance); // 打印优化结果
     Eigen::Vector2f ctrl = controller->getControlSeq().col(0);
+    CONTROLLER_T::state_trajectory target_traj = controller->getTargetStateSeq();
+    publishTargetPath(target_traj); // 发布预测轨迹
+
     std_msgs::Float32 left_cmd, right_cmd;
     left_cmd.data = ctrl(0);
     right_cmd.data = ctrl(1);
@@ -225,11 +254,12 @@ int main(int argc, char **argv)
     plant = std::make_shared<PLANT_T>(controller, 1 / controller_params.dt_, 1);                                          // PLANT实例化
 
     // 读取话题名称
-    std::string obs_topic, tgt_topic, left_cmd_topic, right_cmd_topic;
+    std::string obs_topic, tgt_topic, left_cmd_topic, right_cmd_topic, target_traj_topic;
     nh.param<std::string>("topics/observation", obs_topic, "/heron/odom");
     nh.param<std::string>("topics/target", tgt_topic, "/heron/goal");
     nh.param<std::string>("topics/left_thruster_cmd", left_cmd_topic, "/heron/left_thruster_cmd");
     nh.param<std::string>("topics/right_thruster_cmd", right_cmd_topic, "/heron/right_thruster_cmd");
+    nh.param<std::string>("topics/target_trajectory", target_traj_topic, "/heron/target_trajectory");
 
     ROS_INFO_STREAM(ANSI_PURPLE << "MPPI控制器初始化完成!");
     ROS_INFO_STREAM(ANSI_PURPLE << "预测域: " << controller_params.num_timesteps_ << ", 步长: " << std::fixed << std::setprecision(3) << controller_params.dt_ << ", 积分器子步长: " << substep << ", 控制标准差: " << stddev_ << ", FXTDO: " << std::boolalpha << dynamics.enable_fxtdo_);
@@ -239,6 +269,8 @@ int main(int argc, char **argv)
     ros::Subscriber sub_tgt = nh.subscribe(tgt_topic, 10, target_cb);
     left_thruster_pub = nh.advertise<std_msgs::Float32>(left_cmd_topic, 10);
     right_thruster_pub = nh.advertise<std_msgs::Float32>(right_cmd_topic, 10);
+    target_traj_pub = nh.advertise<nav_msgs::Path>(target_traj_topic, 1);
+
     // Timer for MPC at rate dt
     ros::Timer mpc_timer = nh.createTimer(ros::Duration(controller_params.dt_), &mpc_timer_cb);
 

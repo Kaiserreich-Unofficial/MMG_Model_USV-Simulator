@@ -49,8 +49,8 @@ simulation:
   omega: 0.1 # 圆轨迹角速度
   amplitude_x: 6.8
   amplitude_y: 9.6
-  angular_x: 0.2
-  angular_y: 0.1
+  angular_x: 0.1
+  angular_y: 0.05
   x_goal: 50 # 点轨迹目标x坐标
   y_goal: 50 # 点轨迹目标y坐标
   psi_goal: 3.14159 # 点轨迹目标航向
