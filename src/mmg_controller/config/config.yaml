@@ -11,7 +11,7 @@ heartbeat_duration: 0.1 # 控制器心跳周期
 stddev: 10.0 # 控制器输出噪声标准差
 exponents: 1.0 # 控制器输出噪声指数
 input_limit: 20.0 # 控制器输入限制
-use_adaptive_stddev: True # 是否使用自适应方差
+
 dynamics_test: # 以实际动力学为准
   left_input: 0 # 左推力输入
   right_input: 10 # 右推力输入
@@ -25,6 +25,18 @@ hydrodynamics: # 水动力学参数
   Xu: 26.43
   Yv: 72.64
   Nr: 22.96
+
+fxtdo: # 固定时间扰动观测器
+  enable: true
+  L1: 1.0
+  L2: 1.0
+  k1: 3.0
+  k1p: 1.0
+  k1pp: 0.5
+  k2: 2.0
+  k2p: 1.0
+  k2pp: 0.2
+  d_inf: 0.3
 topics:
   observation: /heron/odom
   target: /heron/goal

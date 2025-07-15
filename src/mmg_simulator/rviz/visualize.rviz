@@ -86,7 +86,7 @@ Visualization Manager:
           Value: true
         Value: true
       Enabled: true
-      Keep: 10000
+      Keep: 1000
       Name: Odometry
       Position Tolerance: 0.10000000149011612
       Queue Size: 10
@@ -121,7 +121,7 @@ Visualization Manager:
           Value: true
         Value: true
       Enabled: true
-      Keep: 10000
+      Keep: 700
       Name: Odometry
       Position Tolerance: 0.10000000149011612
       Queue Size: 10
@@ -166,7 +166,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 159.8601531982422
+      Distance: 32.728755950927734
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -174,15 +174,15 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 0.24905282258987427
-        Y: -0.5781151652336121
-        Z: -0.515638530254364
+        X: -0.2833419442176819
+        Y: 0.8103840351104736
+        Z: -0.46346336603164673
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.4753973484039307
+      Pitch: 1.4703973531723022
       Target Frame: <Fixed Frame>
       Yaw: 0.01039863470941782
     Saved: ~
@@ -202,5 +202,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1200
-  X: 2095
-  Y: -50
+  X: 995
+  Y: 204

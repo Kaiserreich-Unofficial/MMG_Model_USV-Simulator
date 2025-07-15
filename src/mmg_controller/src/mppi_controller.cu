@@ -56,8 +56,8 @@ std::shared_ptr<FB_T> fb_controller;      // feedback controller
 std::shared_ptr<PLANT_T> plant;           // mpc plant
 std::shared_ptr<SAMPLER_T> sampler;       // mppi sampler
 
-float input_limit;                // 控制指令限制
-bool use_adaptive_stddev = false; // 是否使用自适应标准差
+float input_limit;     // 控制指令限制
+bool use_fxtdo = true; // 是否使用固定时间扰动观测器
 
 // 心跳保活机制
 float heartbeat_duration;
@@ -136,22 +136,14 @@ void mpc_timer_cb(const ros::TimerEvent &event_)
     memcpy(cost_params.s_goal, target_state.data(), DYN_T::STATE_DIM * sizeof(float)); // 更新目标状态
     plant->setCostParams(cost_params);
     plant->updateState(observed_state, ros::Time::now().toSec());
+    if (dynamics.enable_fxtdo_)
+        dynamics.fxtdo_.setObservedState(observed_state.data());
     static std::atomic<bool> alive(true); // 优化线程的存活标志
     static float last_femean;             // 上一次优化得到的自由能
     plant->runControlIteration(&alive);
     auto fe_stat = controller->getFreeEnergyStatistics(); // 获取自由能统计信息
     ROS_INFO_STREAM(ANSI_GREEN << "平均优化时间: " << std::fixed << std::setprecision(2) << plant->getAvgOptimizationTime() << " ms, 上次优化时间: " << std::setprecision(1) << plant->getLastOptimizationTime() << " ms");
     ROS_INFO_STREAM(ANSI_CYAN << "Free Energy: " << std::fixed << std::setprecision(3) << fe_stat.real_sys.freeEnergyMean << " +- " << fe_stat.real_sys.freeEnergyVariance); // 打印优化结果
-    if (use_adaptive_stddev)                                                                                                                                    // 如果使用自适应标准差，则根据自由能变化更新标准差
-    {
-        auto sampler_params = sampler->getParams();
-        // 将自由能变化从正负无穷映射到[-1, 1]，之后计算权重更新标准差
-        float stddev_weight = std::clamp(1.0f + .1f * tanhf(fe_stat.real_sys.freeEnergyMean - last_femean), .5f, 1.1f);
-        sampler_params.std_dev[0] *= stddev_weight;
-        sampler_params.std_dev[1] *= stddev_weight;
-        sampler->setParams(sampler_params);
-        last_femean = fe_stat.real_sys.freeEnergyMean;
-    }
     Eigen::Vector2f ctrl = controller->getControlSeq().col(0);
     std_msgs::Float32 left_cmd, right_cmd;
     left_cmd.data = ctrl(0);
@@ -180,7 +172,6 @@ int main(int argc, char **argv)
     float substep;                                                           // 积分器子步长
     nh.param<float>("input_limit", input_limit, 20.0);                       // 控制器输入限制
     nh.param<float>("substep", substep, 0.01);                               // 积分器子步长
-    nh.param<bool>("use_adaptive_stddev", use_adaptive_stddev, false);       // 是否使用自适应标准差
     nh.param<float>("hydrodynamics/mass", hydro_params.mass, 38.0);          // 质量
     nh.param<float>("hydrodynamics/Iz", hydro_params.Iz, 6.25);              // 转动惯量
     nh.param<float>("hydrodynamics/B", hydro_params.B, 0.74);                // 桨距
@@ -192,6 +183,23 @@ int main(int argc, char **argv)
     nh.param<float>("hydrodynamics/Nr", hydro_params.N_r, 22.96);            // Nr
 
     dynamics.setDynamicsParams(hydro_params, input_limit, substep); // 设置动力学参数
+
+    // 水动力参数
+    float L1, L2, k1, k1p, k1pp, k2, k2p, k2pp, d_inf;            // 固定时间扰动观测器参数
+    nh.param<bool>("fxtdo/enable", dynamics.enable_fxtdo_, true); // 是否使用固定时间扰动观测器
+    if (dynamics.enable_fxtdo_)
+    {
+        nh.param<float>("fxtdo/L1", L1, 1.0f);
+        nh.param<float>("fxtdo/L2", L2, 1.0f);
+        nh.param<float>("fxtdo/k1", k1, 3.0f);
+        nh.param<float>("fxtdo/k1p", k1p, 1.0f);
+        nh.param<float>("fxtdo/k1pp", k1pp, 0.5f);
+        nh.param<float>("fxtdo/k2", k2, 2.0f);
+        nh.param<float>("fxtdo/k2p", k2p, 1.0f);
+        nh.param<float>("fxtdo/k2pp", k2pp, 0.2f);
+        nh.param<float>("fxtdo/d_inf", d_inf, 0.3f);
+        dynamics.fxtdo_.setObserverGains(L1, L2, k1, k1p, k1pp, k2, k2p, k2pp, d_inf);
+    }
 
     // 读取心跳超时参数
     nh.param<float>("heartbeat_duration", heartbeat_duration, 0.5);
@@ -224,7 +232,7 @@ int main(int argc, char **argv)
     nh.param<std::string>("topics/right_thruster_cmd", right_cmd_topic, "/heron/right_thruster_cmd");
 
     ROS_INFO_STREAM(ANSI_PURPLE << "MPPI控制器初始化完成!");
-    ROS_INFO_STREAM(ANSI_PURPLE << "预测域: " << controller_params.num_timesteps_ << ", 步长: " << std::fixed << std::setprecision(3) << controller_params.dt_ << ", 积分器子步长: " << substep << ", 控制标准差: " << stddev_ << ", 自适应标准差: " << std::boolalpha << use_adaptive_stddev);
+    ROS_INFO_STREAM(ANSI_PURPLE << "预测域: " << controller_params.num_timesteps_ << ", 步长: " << std::fixed << std::setprecision(3) << controller_params.dt_ << ", 积分器子步长: " << substep << ", 控制标准差: " << stddev_ << ", FXTDO: " << std::boolalpha << dynamics.enable_fxtdo_);
 
     // 设置订阅
     ros::Subscriber sub_obs = nh.subscribe(obs_topic, 10, observer_cb);

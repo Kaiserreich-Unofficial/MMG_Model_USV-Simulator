@@ -6,6 +6,7 @@
 
 #include <mppi/utils/math_utils.h>
 #include <mppi/dynamics/dynamics.cuh>
+#include "FxTDO.cuh"
 
 namespace heron
 {
@@ -89,6 +90,8 @@ namespace heron
         // 施加控制约束
         __host__ void enforceConstraints(Eigen::Ref<state_array> state, Eigen::Ref<control_array> control);
         __device__ void enforceConstraints(float *state, float *control);
+        bool enable_fxtdo_;      // 是否启用扰动状态观测器
+        FxTDO fxtdo_; // 扰动状态观测器
 
     private:
         // 自定义参数

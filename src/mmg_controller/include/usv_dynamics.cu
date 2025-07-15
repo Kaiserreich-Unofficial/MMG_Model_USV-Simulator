@@ -23,6 +23,8 @@ namespace heron
         this->inv_M_ = M_.inverse();
         // 设置阻尼矩阵
         this->D_ = (Eigen::Vector3f() << this->hydroparams_.X_u, this->hydroparams_.Y_v, this->hydroparams_.N_r).finished().asDiagonal();
+        if (this->enable_fxtdo_)
+            this->fxtdo_ = FxTDO(this->hydroparams_.mass, this->hydroparams_.Iz);
         // ROS_INFO_STREAM("阻尼矩阵 D = \n" << this->D_.format(Eigen::IOFormat(4, 0, ", ", "\n", "[", "]")));
     }
 
@@ -50,11 +52,19 @@ namespace heron
                                     (this->hydroparams_.mass - this->hydroparams_.Y_v_dot) * v_, -(this->hydroparams_.mass - this->hydroparams_.X_u_dot) * u_, 0)
                                        .finished(); // 构造科氏力矩阵
 
+        const Eigen::Vector3f tau_eff = tau - C_ * state.tail(3) - this->D_ * state.tail(3); // 计算等效力矩
         // Compute the dynamics
         state_der(0) = cpsi_ * u_ - spsi_ * v_;
         state_der(1) = spsi_ * u_ + cpsi_ * v_;
         state_der(2) = r_;
-        state_der.tail(3) = this->inv_M_ * (tau - C_ * state.tail(3) - this->D_ * state.tail(3)); // 计算随体速度的导数
+        state_der.tail(3) = this->inv_M_ * tau_eff; // 计算速度导数
+
+        if (this->enable_fxtdo_)
+        {
+            // 加上FxTDO的观测扰动
+            this->fxtdo_.update(tau_eff.data(), this->substep_); // 更新FxTDO的观测
+            state_der.tail(3) += inv_M_ * this->fxtdo_.getDisturbance();
+        }
     }
 
     __device__ void USVDynamics::computeDynamics(float *state,
@@ -99,9 +109,7 @@ namespace heron
         float D2 = Nr * r;
 
         // === 等效力 ===
-        float rhs0 = tau0 - C0 - D0;
-        float rhs1 = tau1 - C1 - D1;
-        float rhs2 = tau2 - C2 - D2;
+        float rhs[3] = {tau0 - C0 - D0, tau1 - C1 - D1, tau2 - C2 - D2};
 
         // === 计算惯性矩阵逆 ===（因为 M 是对角阵）
         float inv_M00 = 1.0f / (m - Xu_dot);
@@ -109,9 +117,9 @@ namespace heron
         float inv_M22 = 1.0f / (Iz - Nr_dot);
 
         // === nu_dot ===
-        float nu_dot_0 = inv_M00 * rhs0;
-        float nu_dot_1 = inv_M11 * rhs1;
-        float nu_dot_2 = inv_M22 * rhs2;
+        float nu_dot_0 = inv_M00 * rhs[0];
+        float nu_dot_1 = inv_M11 * rhs[1];
+        float nu_dot_2 = inv_M22 * rhs[2];
 
         // === 状态导数 ===
         state_der[0] = cpsi * u - spsi * v;
@@ -120,6 +128,18 @@ namespace heron
         state_der[3] = nu_dot_0;
         state_der[4] = nu_dot_1;
         state_der[5] = nu_dot_2;
+
+        if (this->enable_fxtdo_)
+        {
+            // 加上FxTDO的观测扰动
+            this->fxtdo_.update(rhs, this->substep_); // 更新FxTDO的观测
+            float d_hat[3];
+            fxtdo_.getDisturbance(d_hat);
+
+            state_der[3] += inv_M00 * d_hat[0];
+            state_der[4] += inv_M11 * d_hat[1];
+            state_der[5] += inv_M22 * d_hat[2];
+        }
     }
 
     void USVDynamics::step(Eigen::Ref<state_array> state,
