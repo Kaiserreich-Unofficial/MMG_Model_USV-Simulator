@@ -11,9 +11,10 @@ Panels:
         - /Axes1
         - /Odometry1
         - /Odometry1/Shape1
+        - /Path1
         - /Odometry2
         - /Odometry2/Shape1
-        - /Odometry2/Covariance1
+        - /Path2
       Splitter Ratio: 0.5
     Tree Height: 555
   - Class: rviz/Selection
@@ -103,6 +104,30 @@ Visualization Manager:
       Topic: /heron/odom
       Unreliable: false
       Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 25; 255; 0
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Lines
+      Line Width: 0.029999999329447746
+      Name: Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: ""
+      Unreliable: false
+      Value: true
     - Angle Tolerance: 0.10000000149011612
       Class: rviz/Odometry
       Covariance:
@@ -121,7 +146,7 @@ Visualization Manager:
           Value: true
         Value: true
       Enabled: true
-      Keep: 700
+      Keep: 50
       Name: Odometry
       Position Tolerance: 0.10000000149011612
       Queue Size: 10
@@ -129,13 +154,37 @@ Visualization Manager:
         Alpha: 1
         Axes Length: 1
         Axes Radius: 0.10000000149011612
-        Color: 85; 0; 255
+        Color: 85; 85; 255
         Head Length: 0.30000001192092896
         Head Radius: 0.10000000149011612
         Shaft Length: 0.10000000149011612
         Shaft Radius: 0.05000000074505806
         Value: Arrow
-      Topic: /heron/goal
+      Topic: /heron/target_odom
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 25; 255; 0
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Lines
+      Line Width: 0.029999999329447746
+      Name: Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: /heron/predict_traj
       Unreliable: false
       Value: true
   Enabled: true
@@ -166,7 +215,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 32.728755950927734
+      Distance: 23.648914337158203
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -174,9 +223,9 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: -0.2833419442176819
-        Y: 0.8103840351104736
-        Z: -0.46346336603164673
+        X: -0.43184202909469604
+        Y: -1.1513254642486572
+        Z: -0.4464496076107025
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -202,5 +251,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1200
-  X: 995
-  Y: 204
+  X: 183
+  Y: -20

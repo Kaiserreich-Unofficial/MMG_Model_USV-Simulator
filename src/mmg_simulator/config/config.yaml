@@ -29,5 +29,7 @@ wind:
 
 topics:
   odom: /heron/odom
+  target: /heron/goal
+  target_odom: /heron/target_odom
   left_thruster_cmd: /heron/left_thruster_cmd
   right_thruster_cmd: /heron/right_thruster_cmd
