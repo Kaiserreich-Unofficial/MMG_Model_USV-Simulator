@@ -44,7 +44,7 @@ topics:
   right_thruster_cmd: /heron/right_thruster_cmd
 simulation:
   time_total: 300 # 仿真总时长
-  traj_type: circle # 轨迹类型
+  traj_type: eight # 轨迹类型
   radius: 8 # 圆轨迹半径
   omega: 0.1 # 圆轨迹角速度
   amplitude_x: 6.8

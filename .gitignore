@@ -11,6 +11,10 @@ devel
 .catkin_tools
 logs
 
+# PyCache
+**/__pycache__/
+**/*.py[cod]
+
 # CMake Cache
 CMakeCache.txt
 CMakeFiles

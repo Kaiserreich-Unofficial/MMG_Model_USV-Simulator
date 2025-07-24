@@ -17,13 +17,13 @@ hydrodynamics:
 wave:
   enable: true
   N: 64 # 采样点数
-  Hs: 0.5 # 有义波高
+  Hs: 1.0 # 有义波高
   Tp: 8.0 # 波峰周期
   direction: 60.0 # 波向
 
 wind:
   enable: true
-  speed: 3.0 # 风速
+  speed: 4.0 # 风速
   direction: 180.0 # 风向
   rho: 1.225 # 空气密度
 
