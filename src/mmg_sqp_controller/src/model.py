@@ -1,7 +1,8 @@
-from casadi import MX, vertcat, diagcat, solve, cos, sin, diagcat
+from casadi import SX, vertcat, diagcat, solve, cos, sin, Function
 from acados_template import AcadosOcp, AcadosOcpSolver
 from numpy import ndarray
 import numpy as np
+
 
 class HydroParams:
     def __init__(self):
@@ -17,39 +18,28 @@ class HydroParams:
 
 
 class MMG_Model:
-    def __init__(self, params: HydroParams):
+    def __init__(self, params, dt: float, substeps: int):
         self.name = "standard_mmg_model"
 
-        # State & Control Variables
-        x = MX.sym("x")
-        y = MX.sym("y")
-        psi = MX.sym("psi")
-        u = MX.sym("u")
-        v = MX.sym("v")
-        r = MX.sym("r")
-        Tl = MX.sym("Tl")
-        Tr = MX.sym("Tr")
+        # 状态与控制
+        x = SX.sym("x")
+        y = SX.sym("y")
+        psi = SX.sym("psi")
+        u = SX.sym("u")
+        v = SX.sym("v")
+        r = SX.sym("r")
+        Tl = SX.sym("Tl")
+        Tr = SX.sym("Tr")
         self.states = vertcat(x, y, psi, u, v, r)
         self.controls = vertcat(Tl, Tr)
 
-        # State Derivatives
-        x_dot = MX.sym("x_dot")
-        y_dot = MX.sym("y_dot")
-        psi_dot = MX.sym("psi_dot")
-        u_dot = MX.sym("u_dot")
-        v_dot = MX.sym("v_dot")
-        r_dot = MX.sym("r_dot")
-        self.states_der = vertcat(x_dot, y_dot, psi_dot, u_dot, v_dot, r_dot)
-
-        # Dynamics
+        # === 连续时间动力学 ===
         tau = vertcat(Tl + Tr, 0, 0.5 * params.B * (Tl - Tr))
-
-        C_nu = MX.zeros(3, 3)
+        C_nu = SX.zeros(3, 3)
         C_nu[0, 2] = -(params.mass - params.Yv_dot) * v
         C_nu[1, 2] = (params.mass - params.Xu_dot) * u
         C_nu[2, 0] = (params.mass - params.Yv_dot) * v
         C_nu[2, 1] = -(params.mass - params.Xu_dot) * u
-
         M = diagcat(params.mass - params.Xu_dot,
                     params.mass - params.Yv_dot,
                     params.I_z - params.Nr_dot)
@@ -65,14 +55,27 @@ class MMG_Model:
             nu_dot
         )
 
-        self.f_expl = f_expl
-        self.f_impl = self.states_der - f_expl
-        self.z = MX.sym("z", 0)
-        self.p = MX.sym("p", 0)
+        # === 离散时间 RK4 子步长积分 ===
+        h = dt / substeps
+        x_in = self.states
+        u_in = self.controls
+        x_next = x_in
+
+        f = Function("f", [self.states, self.controls], [f_expl])
+        x_next = x_in
+        for _ in range(substeps):
+            k1 = f(x_next, u_in)
+            k2 = f(x_next + 0.5 * h * k1, u_in)
+            k3 = f(x_next + 0.5 * h * k2, u_in)
+            k4 = f(x_next + h * k3, u_in)
+            x_next = x_next + (h / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
+
+        self.disc_dyn_expr = x_next
+
 
 class Acados_Settings:
     def __init__(self, params: HydroParams, thrust_lim: float, x_init: ndarray, horizon: int, dt: float, Q: ndarray, R: ndarray):
-        self.model = MMG_Model(params)
+        self.model = MMG_Model(params, dt, 5)
         self.acados_ocp = AcadosOcp()
         # 求解器选项
         self.acados_ocp.solver_options.N_horizon = horizon
@@ -80,18 +83,16 @@ class Acados_Settings:
         self.acados_ocp.solver_options.qp_solver = "PARTIAL_CONDENSING_HPIPM"
         self.acados_ocp.solver_options.nlp_solver_type = "SQP_RTI"
         self.acados_ocp.solver_options.hessian_approx = "GAUSS_NEWTON"
-        self.acados_ocp.solver_options.integrator_type = "ERK"
-        self.acados_ocp.solver_options.sim_method_num_stages = 4
+        # self.acados_ocp.solver_options.integrator_type = "ERK"
+        # self.acados_ocp.solver_options.sim_method_num_stages = 4
         self.acados_ocp.solver_options.hpipm_mode = "BALANCE"
         self.acados_ocp.solver_options.qp_solver_warm_start = 1
         self.acados_ocp.solver_options.qp_tol = 1e-2
 
-        # Model
-        self.acados_ocp.model.f_expl_expr = self.model.f_expl
-        self.acados_ocp.model.f_impl_expr = self.model.f_impl
+        # ✅ 使用离散动力学
+        self.acados_ocp.solver_options.integrator_type = "DISCRETE"
+        self.acados_ocp.model.disc_dyn_expr = self.model.disc_dyn_expr
         self.acados_ocp.model.x = self.model.states
-        self.acados_ocp.model.xdot = self.model.states_der
-
         self.acados_ocp.model.u = self.model.controls
         self.acados_ocp.model.name = self.model.name
 
@@ -107,7 +108,6 @@ class Acados_Settings:
 
         Vx = np.zeros((nx+nu, nx))
         Vx[:nx, :nx] = np.eye(nx)
-
 
         Vx_e = np.eye(nx)
 
@@ -127,10 +127,9 @@ class Acados_Settings:
         self.acados_ocp.cost.yref = np.zeros(nx + nu)
         self.acados_ocp.cost.yref_e = np.zeros(nx)
 
-
         # Constraints
         self.acados_ocp.constraints.x0 = x_init
-        self.acados_ocp.constraints.idxbu = np.array([0, 1]) # 推力变化率约束
+        self.acados_ocp.constraints.idxbu = np.array([0, 1])  # 推力变化率约束
         self.acados_ocp.constraints.lbu = np.array([-thrust_lim, -thrust_lim])
         self.acados_ocp.constraints.ubu = np.array([thrust_lim, thrust_lim])
 

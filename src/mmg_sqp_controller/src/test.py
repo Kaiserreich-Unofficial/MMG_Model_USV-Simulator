@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
+import os
+import sys
+
+# 将当前文件所在目录加入 sys.path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from model import HydroParams, Acados_Settings
 import numpy as np
 import time
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.gridspec import GridSpec
-from model import HydroParams, Acados_Settings, MMG_Model
+
 
 # === 参数设定 ===
-horizon = 500
-dt = 0.01
+horizon = 100
+dt = 0.05
 Tf = 200
 params = HydroParams()
 x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])  # x, y, psi, u, v, r
 t = 0.0
-Q = np.diag([1.0, 1.0, 0.5, 0.0, 0.0, 0.0])
+Q = np.diag([1.0, 1.0, 10.0, 0.0, 0.0, 0.0])
 R = np.diag([0.0, 0.0])
 settings = Acados_Settings(params, 20.0, x0, horizon, dt, Q, R)
 model = settings.model
@@ -76,6 +82,8 @@ Tl_data, Tr_data = [], []
 solve_time = 0.0
 
 # === 参考轨迹函数 ===
+
+
 def get_ref_traj(t: float) -> np.ndarray:
     a = 3.2
     b = 4.8
@@ -88,7 +96,8 @@ def get_ref_traj(t: float) -> np.ndarray:
 
     x_dot_dot = -a * 0.2 * 0.2 * np.sin(0.2 * t)
     y_dot_dot = -b * 0.1 * 0.1 * np.cos(0.1 * t)
-    psi_dot = (x_dot * y_dot_dot - y_dot * x_dot_dot) / (x_dot ** 2 + y_dot ** 2)
+    psi_dot = (x_dot * y_dot_dot - y_dot * x_dot_dot) / \
+        (x_dot ** 2 + y_dot ** 2)
 
     cos_psi = np.cos(psi)
     sin_psi = np.sin(psi)
@@ -102,6 +111,8 @@ def get_ref_traj(t: float) -> np.ndarray:
     return np.array([x, y, psi, u, v, r, Tl, Tr])
 
 # === 动画更新函数 ===
+
+
 def update(frame):
     global x0, t, solve_time
 
@@ -121,7 +132,8 @@ def update(frame):
     status = solver.solve()
     elapsed = time.time() - t0
     solve_time += elapsed
-    print(f"[Frame {frame}] status: {status}, time: {elapsed:.4f}, avg: {solve_time/(frame+1):.4f}")
+    print(
+        f"[Frame {frame}] status: {status}, time: {elapsed:.4f}, avg: {solve_time/(frame+1):.4f}")
 
     # 获取控制输入 & 下一状态
     u0 = solver.get(0, "u")
@@ -164,7 +176,9 @@ def update(frame):
 
     return line1, line2, line3, line4, line5, line6, line7, ref_point
 
+
 # === 启动动画 ===
-ani = animation.FuncAnimation(fig, update, frames=Nsim, blit=True, interval=10, repeat=False)
+ani = animation.FuncAnimation(
+    fig, update, frames=Nsim, blit=True, interval=10, repeat=False)
 plt.tight_layout()
 plt.show()
