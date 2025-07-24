@@ -166,6 +166,7 @@ include_directories(
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 catkin_install_python(PROGRAMS
+  scripts/traj_generator.py
   src/controller.py
   src/test.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
