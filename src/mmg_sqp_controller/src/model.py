@@ -33,6 +33,15 @@ class MMG_Model:
         self.states = vertcat(x, y, psi, u, v, r)
         self.controls = vertcat(Tl, Tr)
 
+        # State Derivatives
+        x_dot = SX.sym("x_dot")
+        y_dot = SX.sym("y_dot")
+        psi_dot = SX.sym("psi_dot")
+        u_dot = SX.sym("u_dot")
+        v_dot = SX.sym("v_dot")
+        r_dot = SX.sym("r_dot")
+        self.states_der = vertcat(x_dot, y_dot, psi_dot, u_dot, v_dot, r_dot)
+
         # === 连续时间动力学 ===
         tau = vertcat(Tl + Tr, 0, 0.5 * params.B * (Tl - Tr))
         C_nu = SX.zeros(3, 3)
@@ -48,29 +57,12 @@ class MMG_Model:
         nu = vertcat(u, v, r)
         nu_dot = solve(M, tau - C_nu @ nu - D @ nu)
 
-        f_expl = vertcat(
+        self.f_expl = vertcat(
             u * cos(psi) - v * sin(psi),
             u * sin(psi) + v * cos(psi),
             r,
             nu_dot
         )
-
-        # === 离散时间 RK4 子步长积分 ===
-        h = dt / substeps
-        x_in = self.states
-        u_in = self.controls
-        x_next = x_in
-
-        f = Function("f", [self.states, self.controls], [f_expl])
-        x_next = x_in
-        for _ in range(substeps):
-            k1 = f(x_next, u_in)
-            k2 = f(x_next + 0.5 * h * k1, u_in)
-            k3 = f(x_next + 0.5 * h * k2, u_in)
-            k4 = f(x_next + h * k3, u_in)
-            x_next = x_next + (h / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
-
-        self.disc_dyn_expr = x_next
 
 
 class Acados_Settings:
@@ -83,18 +75,20 @@ class Acados_Settings:
         self.acados_ocp.solver_options.qp_solver = "PARTIAL_CONDENSING_HPIPM"
         self.acados_ocp.solver_options.nlp_solver_type = "SQP_RTI"
         self.acados_ocp.solver_options.hessian_approx = "GAUSS_NEWTON"
-        # self.acados_ocp.solver_options.integrator_type = "ERK"
-        # self.acados_ocp.solver_options.sim_method_num_stages = 4
+        self.acados_ocp.solver_options.integrator_type = "ERK"
+        self.acados_ocp.solver_options.sim_method_num_stages = 4
+        self.acados_ocp.solver_options.sim_method_num_steps = 5
         self.acados_ocp.solver_options.hpipm_mode = "BALANCE"
         self.acados_ocp.solver_options.qp_solver_warm_start = 1
         self.acados_ocp.solver_options.qp_tol = 1e-2
 
         # ✅ 使用离散动力学
-        self.acados_ocp.solver_options.integrator_type = "DISCRETE"
-        self.acados_ocp.model.disc_dyn_expr = self.model.disc_dyn_expr
         self.acados_ocp.model.x = self.model.states
         self.acados_ocp.model.u = self.model.controls
         self.acados_ocp.model.name = self.model.name
+        self.acados_ocp.model.f_expl_expr = self.model.f_expl
+
+        self.acados_ocp.model.xdot = self.model.states_der
 
         # Cost
         self.acados_ocp.cost.cost_type = "LINEAR_LS"

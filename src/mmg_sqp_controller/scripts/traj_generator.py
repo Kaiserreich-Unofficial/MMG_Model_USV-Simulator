@@ -133,7 +133,7 @@ class TrajectoryGenerator:
 
 
 if __name__ == '__main__':
-    sleep(20.0)
+    sleep(5.0)
     try:
         generator = TrajectoryGenerator()
         generator.run()
