@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>mmg_controller</name>
+  <name>mmg_performance_tracer</name>
   <version>0.0.0</version>
-  <description>The mmg_controllerackage</description>
+  <description>The mmg_performance_tracer package</description>
 
   <!-- One maintainer tag required, multiple allowed, one person per tag -->
   <!-- Example:  -->
@@ -19,7 +19,7 @@
   <!-- Url tags are optional, but multiple are allowed, one per tag -->
   <!-- Optional attribute type can be: website, bugtracker, or repository -->
   <!-- Example: -->
-  <!-- <url type="website">http://wiki.ros.org/mmg_controllerurl> -->
+  <!-- <url type="website">http://wiki.ros.org/mmg_performance_tracer</url> -->
 
 
   <!-- Author tags are optional, multiple are allowed, one per tag -->

@@ -1,11 +1,8 @@
-cmake_minimum_required(VERSION 3.8)
-project(mmg_simulator LANGUAGES C CXX CUDA)
+cmake_minimum_required(VERSION 3.0.2)
+project(mmg_performance_tracer)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
-add_compile_options(-O3 -ffast-math -flto -fvectorize -fslp-vectorize -fopenmp -mllvm -polly)
-
-link_directories(/usr/local/cuda/lib64)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -20,15 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(Eigen3 REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system)
-find_package(CUDA REQUIRED)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 -diag-suppress=20011,20012,20013,20014,20015")
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -117,7 +106,7 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 -diag-suppress=20011,20012,20013,2
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES mmg_simulator
+#  LIBRARIES mmg_performance_tracer
 #  CATKIN_DEPENDS geometry_msgs roscpp rospy std_msgs tf
 #  DEPENDS system_lib
 )
@@ -129,22 +118,13 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-include
+# include
   ${catkin_INCLUDE_DIRS}
-  ${CUDA_INCLUDE_DIRS}
-)
-
-cuda_add_library(cuda_waveforce
-    include/extwave.cu
-)
-
-set_target_properties(cuda_waveforce PROPERTIES
-    CUDA_ARCHITECTURES "89"
 )
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/mmg_simulator.cpp
+#   src/${PROJECT_NAME}/mmg_performance_tracer.cpp
 # )
 
 ## Add cmake target dependencies of the library
@@ -155,8 +135,7 @@ set_target_properties(cuda_waveforce PROPERTIES
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-# add_executable(${PROJECT_NAME}_node src/mmg_simulator_node.cpp)
-add_executable(simulator src/simulator.cpp)
+# add_executable(${PROJECT_NAME}_node src/mmg_performance_tracer_node.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -167,23 +146,11 @@ add_executable(simulator src/simulator.cpp)
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_dependencies(simulator ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
 # target_link_libraries(${PROJECT_NAME}_node
 #   ${catkin_LIBRARIES}
 # )
-target_link_libraries(cuda_waveforce
-  ${catkin_LIBRARIES}
-  cufft
-  Eigen3::Eigen
-)
-
-target_link_libraries(simulator
-  ${catkin_LIBRARIES}
-  cuda_waveforce
-  Eigen3::Eigen
-)
 
 #############
 ## Install ##
@@ -232,7 +199,7 @@ target_link_libraries(simulator
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_mmg_simulator.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_mmg_performance_tracer.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()

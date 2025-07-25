@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.8)
 set(CMAKE_CUDA_ARCHITECTURES 89)
-project(mmg_controller LANGUAGES C CXX CUDA)
+project(mmg_mppi_controller LANGUAGES C CXX CUDA)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -123,7 +123,7 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 -diag-suppress=20011,20012,20013,2
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES mmg_controller
+#  LIBRARIES mmg_mppi_controller
 #  CATKIN_DEPENDS geometry_msgs roscpp rospy std_msgs tf
 #  DEPENDS system_lib
 )
@@ -141,7 +141,7 @@ include
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/mmg_controller.cpp
+#   src/${PROJECT_NAME}/mmg_mppi_controller.cpp
 # )
 
 ## Add cmake target dependencies of the library
@@ -152,7 +152,7 @@ include
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-# add_executable(${PROJECT_NAME}_node src/mmg_controller_node.cpp)
+# add_executable(${PROJECT_NAME}_node src/mmg_mppi_controller_node.cpp)
 add_executable(mppi_controller src/mppi_controller.cu)
 add_executable(dynamics_test src/dynamics_test.cu)
 
@@ -234,7 +234,7 @@ catkin_install_python(PROGRAMS
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_mmg_controller.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_mmg_mppi_controller.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()

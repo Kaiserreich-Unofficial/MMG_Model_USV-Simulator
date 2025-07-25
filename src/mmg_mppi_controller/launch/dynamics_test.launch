@@ -1,10 +1,10 @@
 <launch>
   <!-- 加载配置 -->
-  <rosparam command="load" file="$(find mmg_controller)/config/config.yaml"/>
+  <rosparam command="load" file="$(find mmg_mppi_controller)/config/config.yaml"/>
 
   <!-- 启动 dynamics_test 节点 -->
   <node name="dynamics_test"
-        pkg="mmg_controller"
+        pkg="mmg_mppi_controller"
         type="dynamics_test"
         output="screen" />
 </launch>
