@@ -117,6 +117,7 @@ class TrajectoryGenerator:
             traj_segment = traj[index:horizon_end]
 
             if traj_segment.shape[0] < self.__horizon:
+                # 填充最后一段
                 pad = np.repeat(
                     traj_segment[-1][np.newaxis, :], self.__horizon - traj_segment.shape[0], axis=0)
                 traj_segment = np.vstack((traj_segment, pad))
@@ -127,13 +128,17 @@ class TrajectoryGenerator:
 
             rospy.loginfo("发布参考轨迹 index [%d ~ %d]", index, horizon_end - 1)
             index += 1
+
             if index >= self.__total_steps:
-                index = self.__total_steps - 1
+                rospy.loginfo("参考轨迹发布完毕，自动退出节点。")
+                rospy.signal_shutdown("Trajectory finished.")
+                break  # 可选，确保退出循环
+
             rate.sleep()
 
 
 if __name__ == '__main__':
-    sleep(5.0)
+    sleep(2.0)
     try:
         generator = TrajectoryGenerator()
         generator.run()

@@ -43,7 +43,7 @@ topics:
   left_thruster_cmd: /heron/left_thruster_cmd
   right_thruster_cmd: /heron/right_thruster_cmd
 simulation:
-  time_total: 300 # 仿真总时长
+  time_total: 200 # 仿真总时长
   traj_type: eight # 轨迹类型
   radius: 8 # 圆轨迹半径
   omega: 0.1 # 圆轨迹角速度

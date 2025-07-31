@@ -22,3 +22,6 @@ CMakeFiles
 # Acados generated files
 c_generated_code/
 acados_ocp.json
+
+# Tracer generated files
+*.csv
