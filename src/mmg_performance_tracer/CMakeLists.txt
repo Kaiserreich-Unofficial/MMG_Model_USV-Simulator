@@ -167,6 +167,7 @@ include_directories(
 # )
 catkin_install_python(PROGRAMS
   src/tracer.py
+  src/simulation.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

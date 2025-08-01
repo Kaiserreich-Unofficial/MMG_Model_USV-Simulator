@@ -2,6 +2,7 @@
 import rospy
 import pandas as pd
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Float32
 from tf.transformations import euler_from_quaternion
 import time
 
@@ -13,29 +14,51 @@ class PerformanceTracer:
         self.timeout_sec = 1.0
         self.target_topic = "/heron/target_odom"
         self.real_topic = "/heron/odom"
+        self.left_thrust_topic = "/heron/left_thruster_cmd"
+        self.right_thrust_topic = "/heron/right_thruster_cmd"
 
-        self.last_target_time = None  # 不设初值
-        self.target_received_once = False  # 尚未收到目标
+        self.last_target_time = None
+        self.target_received_once = False
 
         self.target_log = []
         self.real_log = []
+        self.thrust_log = []
 
-        # 订阅两个 Odom 话题
+        self.latest_left_thrust = 0.0
+        self.latest_right_thrust = 0.0
+
+        # 订阅 Odom
         rospy.Subscriber(self.real_topic, Odometry, self.__real_cb)
         rospy.Subscriber(self.target_topic, Odometry, self.__target_cb)
 
+        # 订阅推力
+        rospy.Subscriber(self.left_thrust_topic, Float32, self.__left_thrust_cb)
+        rospy.Subscriber(self.right_thrust_topic, Float32, self.__right_thrust_cb)
+
         self.timer = rospy.Timer(rospy.Duration(0.1), self.__check_timeout)
-        rospy.loginfo("PerformanceTracer started. Waiting for odometry messages...")
+
+        rospy.loginfo("PerformanceTracer started. Waiting for odometry and thrust messages...")
 
     def __real_cb(self, msg):
+        if not self.target_received_once:
+            return  # 跳过记录
         state = self.__extract_state(msg)
+        # 追加推进器命令
+        state.extend([self.latest_left_thrust, self.latest_right_thrust])
         self.real_log.append(state)
+        self.thrust_log.append([self.latest_left_thrust, self.latest_right_thrust])
 
     def __target_cb(self, msg):
         self.last_target_time = rospy.Time.now().to_sec()
         self.target_received_once = True
         state = self.__extract_state(msg)
         self.target_log.append(state)
+
+    def __left_thrust_cb(self, msg):
+        self.latest_left_thrust = msg.data
+
+    def __right_thrust_cb(self, msg):
+        self.latest_right_thrust = msg.data
 
     def __extract_state(self, msg):
         pos = msg.pose.pose.position
@@ -48,7 +71,6 @@ class PerformanceTracer:
 
     def __check_timeout(self, event):
         if not self.target_received_once:
-            # 目标轨迹尚未开始发布，跳过
             return
         elapsed = rospy.Time.now().to_sec() - self.last_target_time
 
@@ -59,11 +81,24 @@ class PerformanceTracer:
 
     def __save_logs(self):
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        df_real = pd.DataFrame(self.real_log, columns=["x", "y", "psi", "u", "v", "r"])
-        df_target = pd.DataFrame(self.target_log, columns=["x", "y", "psi", "u", "v", "r"])
+
+        # 对齐长度（防止 target_log 比 real_log 短）
+        min_len = min(len(self.real_log), len(self.target_log), len(self.thrust_log))
+        self.real_log = self.real_log[:min_len]
+        self.target_log = self.target_log[:min_len]
+        self.thrust_log = self.thrust_log[:min_len]
+
+        df_real = pd.DataFrame(self.real_log, columns=[
+            "x", "y", "psi", "u", "v", "r", "left_thrust", "right_thrust"
+        ])
+
+        df_target = pd.DataFrame(self.target_log, columns=[
+            "x", "y", "psi", "u", "v", "r"
+        ])
+
         df_real.to_csv(f"real_odom_{timestamp}.csv", index=False)
         df_target.to_csv(f"target_odom_{timestamp}.csv", index=False)
-        rospy.loginfo("数据已保存至 CSV 文件！")
+        rospy.loginfo("所有数据已保存至 CSV 文件！")
 
 if __name__ == "__main__":
     try:

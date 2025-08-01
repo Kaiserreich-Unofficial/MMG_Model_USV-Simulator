@@ -1,8 +1,10 @@
-<launch>
-    <!-- 加载整个 YAML 文件 -->
-    <rosparam command="load" file="$(find mmg_mppi_controller)/config/config.yaml" />
-    <!-- 启动节点 -->
-    <node name="mppi_controller" pkg="mmg_mppi_controller" type="mppi_controller" output="screen" />
-    <!-- 启动轨迹生成 -->
-    <node pkg="mmg_mppi_controller" type="traj_generator.py" name="TrajGenerator" output="screen"/>
-  </launch>
+<launch> <!--仿真中 TrajGenerator 和 controller 联动退出-->
+  <!-- 加载整个 YAML 文件 -->
+  <rosparam command="load" file="$(find mmg_mppi_controller)/config/config.yaml" />
+
+  <!-- 控制器节点：设置为必需 -->
+  <node name="mppi_controller" pkg="mmg_mppi_controller" type="mppi_controller" output="screen" required="true" />
+
+  <!-- TrajGenerator 节点：设置为必需 -->
+  <node name="TrajGenerator" pkg="mmg_mppi_controller" type="traj_generator.py" output="screen" required="true" />
+</launch>
