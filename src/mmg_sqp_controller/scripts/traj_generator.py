@@ -12,6 +12,7 @@ class TrajectoryGenerator:
         rospy.loginfo("参考轨迹生成器初始化...")
 
         sim_time = rospy.get_param("simulation/time_total", 500.0)
+        self.__speedup = rospy.get_param("simulation/speed_scale", 1.0)
         self.__dt = rospy.get_param("dt", 0.1)
         self.__total_steps = int(sim_time / self.__dt)
 
@@ -108,7 +109,7 @@ class TrajectoryGenerator:
         return traj
 
     def run(self):
-        rate = rospy.Rate(1 / self.__dt)
+        rate = rospy.Rate(self.__speedup / self.__dt)
         traj = self.__generator()
         index = 0
 

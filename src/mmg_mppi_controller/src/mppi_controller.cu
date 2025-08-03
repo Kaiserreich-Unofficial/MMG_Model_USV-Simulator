@@ -204,9 +204,11 @@ int main(int argc, char **argv)
     // MPC 基本参数
     nh.param<int>("horizon", controller_params.num_timesteps_, 100); // 预测域
     nh.param<float>("dt", controller_params.dt_, 0.1);               // 步长
-    nh.param<float>("lambda", controller_params.lambda_, 1.0);       // 温度参数
-    nh.param<float>("alpha", controller_params.alpha_, 0.0);         // 探索参数
-    nh.param<int>("max_iter", controller_params.num_iters_, 1);      // 最大迭代次数
+    float speed_scale;                                               // 仿真器速度倍率
+    nh.param<float>("simulation/speed_scale", speed_scale, 1.f);
+    nh.param<float>("lambda", controller_params.lambda_, 1.0);  // 温度参数
+    nh.param<float>("alpha", controller_params.alpha_, 0.0);    // 探索参数
+    nh.param<int>("max_iter", controller_params.num_iters_, 1); // 最大迭代次数
     nh.param<int>("dyn_block_size", DYN_BLOCK_X, 32);
     controller_params.dynamics_rollout_dim_ = dim3(DYN_BLOCK_X, DYN_BLOCK_Y, 1); // 动力学仿真块大小
     controller_params.cost_rollout_dim_ = dim3(DYN_BLOCK_X, DYN_BLOCK_Y, 1);     // 代价函数仿真块大小
@@ -280,7 +282,7 @@ int main(int argc, char **argv)
     nh.param<std::string>("topics/predict_trajectory", predict_traj_topic, "/heron/predict_traj");
 
     ROS_INFO_STREAM(ANSI_PURPLE << "MPPI控制器初始化完成!");
-    ROS_INFO_STREAM(ANSI_PURPLE << "预测域: " << controller_params.num_timesteps_ << ", 步长: " << std::fixed << std::setprecision(3) << controller_params.dt_ << ", 积分器子步长: " << substep << ", 控制标准差: " << stddev_ << ", FXTDO: " << std::boolalpha << dynamics.enable_fxtdo_);
+    ROS_INFO_STREAM(ANSI_PURPLE << "预测域: " << controller_params.num_timesteps_ << ", 步长: " << std::fixed << std::setprecision(3) << controller_params.dt_ << ", 积分器子步长: " << substep << ", 仿真速度倍率:" << speed_scale << ", 控制标准差: " << stddev_ << ", FXTDO: " << std::boolalpha << dynamics.enable_fxtdo_);
 
     // 设置订阅
     ros::Subscriber sub_obs = nh.subscribe(obs_topic, 10, observer_cb);
@@ -290,7 +292,7 @@ int main(int argc, char **argv)
     predict_traj_pub = nh.advertise<nav_msgs::Path>(predict_traj_topic, 1);
 
     // Timer for MPC at rate dt
-    ros::Timer mpc_timer = nh.createTimer(ros::Duration(controller_params.dt_), &mpc_timer_cb);
+    ros::Timer mpc_timer = nh.createTimer(ros::Duration(static_cast<float>(controller_params.dt_/speed_scale)), &mpc_timer_cb);
 
     // Spin to process callbacks
     ros::spin();

@@ -23,6 +23,7 @@ topics:
   predict_trajectory: /heron/predict_traj
 
 simulation:
+  speed_scale: 2.0 # 速度缩放因子
   time_total: 300 # 仿真总时长
   traj_type: eight # 轨迹类型
   radius: 8 # 圆轨迹半径

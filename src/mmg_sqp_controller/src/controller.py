@@ -29,6 +29,7 @@ class MMGMPCController:
         input_limit: float = rospy.get_param("input_limit", 20.0)
         self.horizon: int = rospy.get_param("horizon", 100)
         self.dt: float = rospy.get_param("dt", 0.1)
+        self.__speedup: float = rospy.get_param("simulation/speed_scale", 1.0)
         Q_list: list[float] = rospy.get_param(
             "x_weight", [1.0, 1.0, 0.5, 0.0, 0.0, 0.0])
         R_list: list[float] = rospy.get_param("u_weight", [0.1, 0.1])
@@ -83,7 +84,8 @@ class MMGMPCController:
             self.__latest_traj = np.array(data).reshape(horizon, dim_state)  # shape=(horizon, 6)
 
     def run(self):
-        rate = rospy.Rate(1.0 / self.dt)  # 控制频率（Hz）
+        import time
+        rate = rospy.Rate(self.__speedup / self.dt)  # 控制频率（Hz）
 
         while not rospy.is_shutdown():
             if self.__latest_traj is None:
@@ -106,11 +108,28 @@ class MMGMPCController:
             self.__solver.set(self.horizon, "yref", self.__latest_traj[-1, :])
 
             # MPC求解器调用
+            start_time = time.time()  # 开始计时
             status = self.__solver.solve()
+            solve_time_ms = (time.time() - start_time) * 1000  # 单位：毫秒
             if status != 0:
                 rospy.logwarn(f"Acados MPC 求解失败, status={status}")
                 rate.sleep()
                 continue
+            # 记录并输出时间
+            if not hasattr(self, '_solve_times'):
+                self._solve_times = []
+
+            self._solve_times.append(solve_time_ms)
+            if len(self._solve_times) > 100:
+                self._solve_times.pop(0)  # 只保留最近100次
+
+            avg_time = sum(self._solve_times) / len(self._solve_times)
+
+            # ANSI 颜色定义
+            ANSI_GREEN = "\033[92m"
+            ANSI_RESET = "\033[0m"
+
+            rospy.loginfo(f"{ANSI_GREEN}平均优化时间: {avg_time:.2f} ms, 上次优化时间: {solve_time_ms:.1f} ms{ANSI_RESET}")
 
             # 发布控制输入
             u0 = self.__solver.get(0, "u")  # [left, right]

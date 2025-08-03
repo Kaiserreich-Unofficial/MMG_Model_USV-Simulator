@@ -9,7 +9,7 @@ alpha : 0.1 # 探索参数
 iter: 4 # 滚动优化迭代次数
 heartbeat_duration: 0.1 # 控制器心跳周期
 stddev: 10.0 # 控制器输出噪声标准差
-exponents: 1.0 # 控制器输出噪声指数
+exponents: 0 # 控制器输出噪声指数
 input_limit: 20.0 # 控制器输入限制
 
 dynamics_test: # 以实际动力学为准
@@ -43,6 +43,7 @@ topics:
   left_thruster_cmd: /heron/left_thruster_cmd
   right_thruster_cmd: /heron/right_thruster_cmd
 simulation:
+  speed_scale: 2.0 # 速度缩放因子
   time_total: 300 # 仿真总时长
   traj_type: eight # 轨迹类型
   radius: 8 # 圆轨迹半径

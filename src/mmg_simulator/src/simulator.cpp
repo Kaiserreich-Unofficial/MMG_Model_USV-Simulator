@@ -57,7 +57,7 @@ void odomCallback(const ros::TimerEvent &event)
         }
     }
 
-    static double sim_start = ros::Time::now().toSec();
+    static double sim_time = 0.0;
     static Eigen::Vector3f extwave = Eigen::Vector3f::Zero(); // 外部波浪力
     static Eigen::Vector3f extwind = Eigen::Vector3f::Zero(); // 外部风力
     Eigen::Vector3f extforce = extwave + extwind;
@@ -66,7 +66,8 @@ void odomCallback(const ros::TimerEvent &event)
 
     if (wave_enable)
     {
-        extwave = wave_->getWaveForce(state_, ros::Time::now().toSec() - sim_start) * scale;                                                   // 计算外部波浪力
+        sim_time += dt;
+        extwave = wave_->getWaveForce(state_, sim_time) * scale;                                                   // 计算外部波浪力
         ROS_INFO_STREAM_THROTTLE(5.0, ANSI_CYAN << "当前波浪力: " << extwave.transpose().format(Eigen::IOFormat(2, 0, ", ", "\n", "[", "]"))); // 打印验证
     }
     if (wind_enable)
@@ -75,6 +76,7 @@ void odomCallback(const ros::TimerEvent &event)
         extwind = wind_->getWindForce(state_); // 计算外部风力
         ROS_INFO_STREAM_THROTTLE(5.0, ANSI_GREEN << "当前风力: " << extwind.transpose().format(Eigen::IOFormat(2, 0, ", ", "\n", "[", "]")));
         ROS_INFO_STREAM_THROTTLE(5.0, ANSI_GREEN << "当前风速: " << wind_->getWindSpeed() << " m/s, 全局风向: " << wind_->getWindDirection() / M_PI * 180 << "°");
+        ROS_INFO_STREAM_THROTTLE(2.0, ANSI_YELLOW << "当前模拟时间: " << sim_time); // 打印验证
     }
     odom_pub.publish(Simulator::state2odom(state_));
 }
@@ -106,6 +108,8 @@ int main(int argc, char **argv)
     float L_, W_;                    // 船体尺寸
     // 基本参数
     nh.param<float>("dt", dt, 0.1);
+    float speed_scale; // 仿真器速度倍率
+    nh.param<float>("speed_scale", speed_scale, 1.f);
     nh.param<std::string>("integrator_type", integrator_type, "rk4");
     nh.param<float>("input_limit", input_limit, 20.0);
     nh.param<float>("Length", L_, 1.3f);
@@ -166,7 +170,7 @@ int main(int argc, char **argv)
     odom_pub = nh.advertise<nav_msgs::Odometry>(odom_topic, 10);            // 发布当前位置
     target_odom_pub = nh.advertise<nav_msgs::Odometry>(tgt_odom_topic, 10); // 发布目标位置
     // 设定定时器固定频率发布odom
-    ros::Timer odom_timer = nh.createTimer(ros::Duration(dt), &odomCallback);
+    ros::Timer odom_timer = nh.createTimer(ros::Duration(dt / speed_scale), &odomCallback);
 
     ros::spin();
     return 0;
