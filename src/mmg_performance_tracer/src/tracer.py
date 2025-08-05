@@ -22,7 +22,6 @@ class PerformanceTracer:
 
         self.target_log = []
         self.real_log = []
-        self.thrust_log = []
 
         self.latest_left_thrust = 0.0
         self.latest_right_thrust = 0.0
@@ -46,7 +45,6 @@ class PerformanceTracer:
         # 追加推进器命令
         state.extend([self.latest_left_thrust, self.latest_right_thrust])
         self.real_log.append(state)
-        self.thrust_log.append([self.latest_left_thrust, self.latest_right_thrust])
 
     def __target_cb(self, msg):
         self.last_target_time = rospy.Time.now().to_sec()
@@ -81,12 +79,6 @@ class PerformanceTracer:
 
     def __save_logs(self):
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-
-        # 对齐长度（防止 target_log 比 real_log 短）
-        min_len = min(len(self.real_log), len(self.target_log), len(self.thrust_log))
-        self.real_log = self.real_log[:min_len]
-        self.target_log = self.target_log[:min_len]
-        self.thrust_log = self.thrust_log[:min_len]
 
         df_real = pd.DataFrame(self.real_log, columns=[
             "x", "y", "psi", "u", "v", "r", "left_thrust", "right_thrust"

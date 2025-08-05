@@ -9,7 +9,6 @@ alpha : 0.1 # 探索参数
 iter: 4 # 滚动优化迭代次数
 heartbeat_duration: 0.1 # 控制器心跳周期
 stddev: 10.0 # 控制器输出噪声标准差
-exponents: 0 # 控制器输出噪声指数
 input_limit: 20.0 # 控制器输入限制
 
 dynamics_test: # 以实际动力学为准
@@ -27,16 +26,15 @@ hydrodynamics: # 水动力学参数
   Nr: 22.96
 
 fxtdo: # 固定时间扰动观测器
-  enable: true
-  L1: 1.0
-  L2: 1.0
+  L1: 5.0
+  L2: 20.0
   k1: 3.0
-  k1p: 1.0
-  k1pp: 0.5
-  k2: 2.0
-  k2p: 1.0
-  k2pp: 0.2
-  d_inf: 0.3
+  k1p: 2.0
+  k1pp: 1.0
+  k2: 3.0
+  k2p: 2.0
+  k2pp: 1.0
+  d_inf: 0.5
 topics:
   observation: /heron/odom
   target: /heron/goal
@@ -44,8 +42,7 @@ topics:
   right_thruster_cmd: /heron/right_thruster_cmd
 simulation:
   speed_scale: 2.0 # 速度缩放因子
-  time_total: 300 # 仿真总时长
-  traj_type: eight # 轨迹类型
+  time_total: 150 # 仿真总时长
   radius: 8 # 圆轨迹半径
   omega: 0.1 # 圆轨迹角速度
   amplitude_x: 6.8

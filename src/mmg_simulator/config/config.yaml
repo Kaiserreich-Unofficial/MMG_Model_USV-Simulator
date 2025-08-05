@@ -24,8 +24,8 @@ wave:
 
 wind:
   enable: true
-  speed: 4.0 # 风速
-  direction: 120.0 # 风向
+  speed: 3.0 # 风速
+  direction: 180.0 # 风向
   rho: 1.225 # 空气密度
 
 topics:
