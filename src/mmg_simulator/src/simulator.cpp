@@ -67,7 +67,7 @@ void odomCallback(const ros::TimerEvent &event)
     if (wave_enable)
     {
         sim_time += dt;
-        extwave = wave_->getWaveForce(state_, sim_time) * scale;                                                   // 计算外部波浪力
+        extwave = wave_->getWaveForce(state_, sim_time);                                                                                       // 计算外部波浪力
         ROS_INFO_STREAM_THROTTLE(5.0, ANSI_CYAN << "当前波浪力: " << extwave.transpose().format(Eigen::IOFormat(2, 0, ", ", "\n", "[", "]"))); // 打印验证
     }
     if (wind_enable)
@@ -134,8 +134,7 @@ int main(int argc, char **argv)
     nh.param<float>("wave/Hs", Hs, .5f);
     nh.param<float>("wave/Tp", Tp, 1.0f);
     nh.param<float>("wave/direction", wave_direction, 0.0);
-    scale = 0.6f * 997.f * 9.81f * Hs * L_ * W_; // 计算波浪力缩放因子
-    wave_ = std::make_shared<CudaWaveForceGenerator>(wave_N, dt, Hs, Tp, wave_direction / 180.f * M_PI);
+    wave_ = std::make_shared<CudaWaveForceGenerator>(wave_N, dt, Hs, Tp, wave_direction / 180.f * M_PI, L_, W_); // 初始化波浪力生成器
 
     // 风参数
     float beta_w_;  // 初始风向（degree）
