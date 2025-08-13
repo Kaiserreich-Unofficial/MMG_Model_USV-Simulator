@@ -29,9 +29,9 @@ namespace heron
         __host__ __device__ FxTDO() : FxTDO(1.0f, 1.0f) {} // 委托构造，防止无法空类初始化
 
         __host__ __device__ void setObserverGains(float L1_, float L2_,
-                                                  float k1_, float k1p_, float k1pp_,
-                                                  float k2_, float k2p_, float k2pp_,
-                                                  float d_inf_ = 0.3f)
+                                                 float k1_, float k1p_, float k1pp_,
+                                                 float k2_, float k2p_, float k2pp_,
+                                                 float d_inf_ = 0.3f)
         {
             L1 = L1_;
             L2 = L2_;
@@ -59,17 +59,35 @@ namespace heron
 
             for (int i = 0; i < 3; ++i)
                 z1_meas[i] = mass_diag[i] * nu[i];
+
 #pragma unroll
             for (int i = 0; i < 3; ++i)
-            {
                 e1[i] = z1_meas[i] - z1_hat[i];
-                float ei = e1[i];
-                float abs_e = fabsf(ei);
-                float sgn_e = (ei >= 0.f ? 1.f : -1.f);
 
-                phi1[i] = k1 * sgn_e * sqrtf(abs_e) + k1p * ei + k1pp * sgn_e * powf(abs_e, 1.0f / (1.0f - d_inf));
-                phi2[i] = k2 * sgn_e + k2p * ei + k2pp * sgn_e * powf(abs_e, (1.0f + d_inf) / (1.0f - d_inf));
+            // Calculate the norm of the error vector e1 as per the paper's definition
+            float norm_e1_sq = e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2];
+            float norm_e1 = sqrtf(norm_e1_sq);
+
+            if (norm_e1 > 1e-6) // Avoid division by zero
+            {
+#pragma unroll
+                for (int i = 0; i < 3; ++i)
+                {
+                    // Calculate phi1 and phi2 based on the vector norm
+                    phi1[i] = k1 * e1[i] / powf(norm_e1, 0.5f) + k1p * e1[i] + k1pp * e1[i] * powf(norm_e1, d_inf / (1.0f - d_inf));
+                    phi2[i] = k2 * e1[i] / norm_e1 + k2p * e1[i] + k2pp * e1[i] * powf(norm_e1, (1.0f + d_inf) / (1.0f - d_inf));
+                }
             }
+            else
+            {
+#pragma unroll
+                for (int i = 0; i < 3; ++i)
+                {
+                    phi1[i] = 0.0f;
+                    phi2[i] = 0.0f;
+                }
+            }
+
 #pragma unroll
             for (int i = 0; i < 3; ++i)
             {
