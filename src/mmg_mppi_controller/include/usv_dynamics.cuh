@@ -92,7 +92,7 @@ namespace heron
         __device__ void enforceConstraints(float *state, float *control);
         bool enable_fxtdo_;      // 是否启用扰动状态观测器
         FxTDO fxtdo_; // 扰动状态观测器
-
+        float fxtdo_alpha_; // 可调节，控制低通滤波带宽
     private:
         // 自定义参数
         HydroDynamicParams hydroparams_; // 水动力参数
@@ -100,6 +100,7 @@ namespace heron
         float substep_;                  // 子步长
         Eigen::Matrix3f inv_M_;          // 惯量矩阵
         Eigen::Matrix3f D_;              // 阻尼矩阵
+        float d_hat_filtered_prev[3] = {0.0f, 0.0f, 0.0f}; // 上一时刻的滤波后的扰动速度
     };
 }
 

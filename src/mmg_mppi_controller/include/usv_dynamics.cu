@@ -61,9 +61,19 @@ namespace heron
 
         if (this->enable_fxtdo_)
         {
-            // 加上FxTDO的观测扰动
-            this->fxtdo_.update(tau_eff.data(), this->substep_); // 更新FxTDO的观测
-            state_der.tail(3) += inv_M_ * this->fxtdo_.getDisturbance();
+            // 更新 FxTDO
+            this->fxtdo_.update(tau_eff.data(), this->substep_);
+            Eigen::Vector3f d_hat = this->fxtdo_.getDisturbance();
+
+            // 低通滤波
+            for (int i = 0; i < 3; ++i)
+            {
+                d_hat(i) = this->fxtdo_alpha_ * d_hat(i) + (1.0f - this->fxtdo_alpha_) * d_hat_filtered_prev[i];
+                d_hat_filtered_prev[i] = d_hat(i);
+            }
+
+            // 叠加到状态导数
+            state_der.tail(3) += this->inv_M_ * d_hat;
         }
     }
 
@@ -131,11 +141,19 @@ namespace heron
 
         if (this->enable_fxtdo_)
         {
-            // 加上FxTDO的观测扰动
-            this->fxtdo_.update(rhs, this->substep_); // 更新FxTDO的观测
+            this->fxtdo_.update(rhs, this->substep_);
             float d_hat[3];
             fxtdo_.getDisturbance(d_hat);
 
+            // 一阶低通滤波
+#pragma unroll
+            for (int i = 0; i < 3; ++i)
+            {
+                d_hat[i] = this->fxtdo_alpha_ * d_hat[i] + (1.0f - this->fxtdo_alpha_) * d_hat_filtered_prev[i];
+                d_hat_filtered_prev[i] = d_hat[i];
+            }
+
+            // 叠加到状态导数
             state_der[3] += inv_M00 * d_hat[0];
             state_der[4] += inv_M11 * d_hat[1];
             state_der[5] += inv_M22 * d_hat[2];
