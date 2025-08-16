@@ -138,10 +138,6 @@ cuda_add_library(cuda_waveforce
     include/extwave.cu
 )
 
-set_target_properties(cuda_waveforce PROPERTIES
-    CUDA_ARCHITECTURES "89"
-)
-
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
 #   src/${PROJECT_NAME}/mmg_simulator.cpp

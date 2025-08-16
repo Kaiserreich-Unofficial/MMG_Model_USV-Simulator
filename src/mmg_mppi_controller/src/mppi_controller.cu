@@ -38,7 +38,7 @@ using COST_PARAM_T = QuadraticCostTrajectoryParams<DYN_T, 100>;
 using COST_T = QuadraticCostTrajectory<DYN_T, 100>;
 using FB_T = DDPFeedback<DYN_T, 100>;
 using SAMPLER_T = mppi::sampling_distributions::ColoredNoiseDistribution<DYN_T::DYN_PARAMS_T>;
-using CONTROLLER_T = ColoredMPPIController<DYN_T, COST_T, FB_T, 100, 8192, SAMPLER_T>;
+using CONTROLLER_T = ColoredMPPIController<DYN_T, COST_T, FB_T, 100, 10240, SAMPLER_T>;
 using CONTROLLER_PARAMS_T = CONTROLLER_T::TEMPLATED_PARAMS;
 using PLANT_T = heron::USVMPCPlant<CONTROLLER_T>;
 using state_array = DYN_T::state_array;
@@ -244,6 +244,7 @@ int main(int argc, char **argv)
         nh.param<float>("fxtdo/k2p", k2p, 1.0f);
         nh.param<float>("fxtdo/k2pp", k2pp, 0.2f);
         nh.param<float>("fxtdo/d_inf", d_inf, 0.3f);
+        nh.param<float>("fxtdo/alpha", dynamics.fxtdo_alpha_, 0.1f); // 观测器低通滤波系数
         dynamics.fxtdo_.setObserverGains(L1, L2, k1, k1p, k1pp, k2, k2p, k2pp, d_inf);
     }
 

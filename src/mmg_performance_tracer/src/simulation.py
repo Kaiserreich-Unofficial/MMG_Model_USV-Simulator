@@ -37,9 +37,8 @@ def make_output_dir(param_dict):
     return output_dir
 
 
-def run_simulation(max_trials, exponents, fxtdo_enabled, trajectory_type):
+def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
     param_dict = {
-        "Exponents": exponents,
         "FxtdoEnabled": fxtdo_enabled,
         "TrajectoryType": trajectory_type
     }
@@ -49,13 +48,13 @@ def run_simulation(max_trials, exponents, fxtdo_enabled, trajectory_type):
     optimization_times = []
 
     trial_iter = tqdm(range(1, max_trials + 1),
-                      desc=f"Ex{exponents}_Fxtdo{fxtdo_enabled}_Traj{trajectory_type}",
+                      desc=f"Fxtdo{fxtdo_enabled}_Traj{trajectory_type}",
                       unit="trial")
     for trial in trial_iter:
         sim_proc = controller_proc = tracer_proc = None
         try:
             sim_proc = launch_process(
-                ["roslaunch", "mmg_simulator", "simulator.launch"],
+                ["roslaunch", "mmg_simulator", "simulator-nogui.launch"],
                 "Simulator",
                 cwd=output_dir
             )
@@ -63,7 +62,6 @@ def run_simulation(max_trials, exponents, fxtdo_enabled, trajectory_type):
 
             controller_cmd = [
                 "roslaunch", "mmg_mppi_controller", "simulation.launch",
-                f"exponents:={exponents}",
                 f"fxtdo_enabled:={str(fxtdo_enabled).lower()}",
                 f"trajectory_type:={trajectory_type}"
             ]
@@ -185,19 +183,18 @@ def run_simulation(max_trials, exponents, fxtdo_enabled, trajectory_type):
 
 
 def main():
-    exponents_list = [0.0, 0.5, 1.0]
-    fxtdo_enabled_list = [False, True]
+    fxtdo_enabled_list = [True, False]
     trajectory_type_list = ["circle", "eight"]
 
-    max_trials = 80
-    param_product = list(product(exponents_list, fxtdo_enabled_list, trajectory_type_list))
+    max_trials = 50
+    param_product = list(product(fxtdo_enabled_list, trajectory_type_list))
     total_runs = len(param_product)
 
     print(f"[INFO] 总共要跑 {total_runs} 组参数，每组 {max_trials} 次仿真")
 
     try:
-        for exponents, fxtdo_enabled, trajectory_type in param_product:
-            run_simulation(max_trials, exponents, fxtdo_enabled, trajectory_type)
+        for fxtdo_enabled, trajectory_type in param_product:
+            run_simulation(max_trials, fxtdo_enabled, trajectory_type)
     except KeyboardInterrupt:
         print("\n[INTERRUPTED] 脚本被手动终止，退出。")
         sys.exit(0)
