@@ -1,0 +1,37 @@
+horizon: 100 # 单位：步
+dt: 0.05 # 单位：秒
+x_weight: [1.0, 1.0, 0.5, 0.0, 0.0, 0.0] # 状态变量权重
+u_weight: [0.1, 0.1] # 控制变量权重
+input_limit: 20.0 # 控制器输入限制
+
+hydrodynamics: # 水动力学参数
+  mass: 38.0
+  Iz: 6.25
+  B: 0.74
+  Xu_dot: -1.9
+  Yv_dot: -29.3171
+  Nr_dot: -4.2155
+  Xu: 26.43
+  Yv: 72.64
+  Nr: 22.96
+
+topics:
+  observation: /heron/odom
+  target: /heron/goal
+  left_thruster_cmd: /heron/left_thruster_cmd
+  right_thruster_cmd: /heron/right_thruster_cmd
+  predict_trajectory: /heron/predict_traj
+
+simulation:
+  speed_scale: 2.0 # 速度缩放因子
+  time_total: 250 # 仿真总时长
+  traj_type: eight # 轨迹类型
+  radius: 8 # 圆轨迹半径
+  omega: 0.1 # 圆轨迹角速度
+  amplitude_x: 6.8
+  amplitude_y: 9.6
+  angular_x: 0.1
+  angular_y: 0.05
+  x_goal: 50 # 点轨迹目标x坐标
+  y_goal: 50 # 点轨迹目标y坐标
+  psi_goal: 3.14159 # 点轨迹目标航向

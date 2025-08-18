@@ -1,0 +1,30 @@
+*.i
+*.ii
+*.gpu
+*.ptx
+*.cubin
+*.fatbin
+
+# Catkin generated folders
+build
+devel
+.catkin_tools
+logs
+
+# PyCache
+**/__pycache__/
+**/*.py[cod]
+
+# CMake Cache
+CMakeCache.txt
+CMakeFiles
+
+# Acados generated files
+c_generated_code/
+acados_ocp.json
+
+# Tracer generated files
+*.csv
+
+# Vscode generated files
+.vscode/
