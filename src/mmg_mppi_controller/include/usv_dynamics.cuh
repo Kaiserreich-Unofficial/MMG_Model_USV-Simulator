@@ -71,13 +71,12 @@ namespace heron
             return "SmallYellowBoat Dynamics";
         }
 
-        void computeDynamics(const Eigen::Ref<const state_array> &state, const Eigen::Ref<const control_array> &control,
-                             Eigen::Ref<state_array> state_der);
+        void computeDynamics(const Eigen::Ref<const state_array> &state, const Eigen::Ref<const control_array> &control, Eigen::Ref<state_array> state_der, FxTDOState &fxtdo_state);
 
         void printState(float *state);
         void printState(const float *state);
 
-        __device__ void computeDynamics(float *state, float *control, float *state_der, float *theta = nullptr);
+        __device__ void computeDynamics(float *state, float *control, float *state_der, FxTDOState &fxtdo_state, float *theta = nullptr);
 
         void step(Eigen::Ref<state_array> state, Eigen::Ref<state_array> next_state, Eigen::Ref<state_array> state_der,
                   const Eigen::Ref<const control_array> &control, Eigen::Ref<output_array> output, const float t,
@@ -90,9 +89,10 @@ namespace heron
         // 施加控制约束
         __host__ void enforceConstraints(Eigen::Ref<state_array> state, Eigen::Ref<control_array> control);
         __device__ void enforceConstraints(float *state, float *control);
-        bool enable_fxtdo_;      // 是否启用扰动状态观测器
-        FxTDO fxtdo_; // 扰动状态观测器
-        float fxtdo_alpha_; // 可调节，控制低通滤波带宽
+        bool enable_fxtdo_; // 是否启用扰动状态观测器
+        FxTDO fxtdo_;       // 扰动状态观测器
+        FxTDOState shared_fxtdo_state;   // 共享的扰动状态观测器状态
+
     private:
         // 自定义参数
         HydroDynamicParams hydroparams_; // 水动力参数
@@ -100,7 +100,6 @@ namespace heron
         float substep_;                  // 子步长
         Eigen::Matrix3f inv_M_;          // 惯量矩阵
         Eigen::Matrix3f D_;              // 阻尼矩阵
-        float d_hat_filtered_prev[3] = {0.0f, 0.0f, 0.0f}; // 上一时刻的滤波后的扰动速度
     };
 }
 

@@ -24,19 +24,18 @@ namespace heron
         const float Nr_dot = this->hydroparams_.N_r_dot;
         // 设置惯性矩阵的逆
         Eigen::Matrix3f M_ = (Eigen::Vector3f() << mass - Xu_dot, mass - Yv_dot, Iz - Nr_dot).finished().asDiagonal();
-        // ROS_INFO_STREAM("惯性矩阵 M = \n" << M_.format(Eigen::IOFormat(4, 0, ", ", "\n", "[", "]")));
         this->inv_M_ = M_.inverse();
         // 设置阻尼矩阵
         this->D_ = (Eigen::Vector3f() << this->hydroparams_.X_u, this->hydroparams_.Y_v, this->hydroparams_.N_r).finished().asDiagonal();
         if (this->enable_fxtdo_)
             this->fxtdo_ = FxTDO(mass, Iz, Xu_dot, Yv_dot, Nr_dot);
-        // ROS_INFO_STREAM("阻尼矩阵 D = \n" << this->D_.format(Eigen::IOFormat(4, 0, ", ", "\n", "[", "]")));
     }
 
     // 计算动力学方程
     void USVDynamics::computeDynamics(const Eigen::Ref<const state_array> &state,
                                       const Eigen::Ref<const control_array> &control,
-                                      Eigen::Ref<state_array> state_der)
+                                      Eigen::Ref<state_array> state_der,
+                                      FxTDOState &fxtdo_state)
     {
         // Extract state variables
         const float psi_ = state(2);    // Heading Angle
@@ -67,17 +66,17 @@ namespace heron
         if (this->enable_fxtdo_)
         {
             // 更新 FxTDO
-            this->fxtdo_.update(tau_eff.data(), this->substep_);
-            Eigen::Vector3f d_hat = this->fxtdo_.getDisturbance();
+            this->fxtdo_.update(tau_eff.data(), this->substep_, fxtdo_state);
 
             // 叠加到状态导数
-            state_der.tail(3) += this->inv_M_ * d_hat;
+            state_der.tail(3) += this->inv_M_ * Eigen::Vector3f(fxtdo_state.fd_hat[0], fxtdo_state.fd_hat[1], fxtdo_state.fd_hat[2]);
         }
     }
 
     __device__ void USVDynamics::computeDynamics(float *state,
                                                  float *control,
                                                  float *state_der,
+                                                 FxTDOState &fxtdo_state,
                                                  float *theta_s)
     {
         float psi = state[2];
@@ -139,14 +138,12 @@ namespace heron
 
         if (this->enable_fxtdo_)
         {
-            this->fxtdo_.update(rhs, this->substep_);
-            float d_hat[3];
-            fxtdo_.getDisturbance(d_hat);
+            this->fxtdo_.update(rhs, this->substep_, fxtdo_state);
 
             // 叠加到状态导数
-            state_der[3] += inv_M00 * d_hat[0];
-            state_der[4] += inv_M11 * d_hat[1];
-            state_der[5] += inv_M22 * d_hat[2];
+            state_der[3] += inv_M00 * fxtdo_state.fd_hat[0];
+            state_der[4] += inv_M11 * fxtdo_state.fd_hat[1];
+            state_der[5] += inv_M22 * fxtdo_state.fd_hat[2];
         }
     }
 
@@ -158,6 +155,7 @@ namespace heron
                            const float t,
                            const float dt)
     {
+        FxTDOState local_fxtdo_state = this->shared_fxtdo_state;
         const uint8_t M = static_cast<uint8_t>(dt / this->substep_ + 0.5f); // 四舍五入取整
 
         state_array x = state;
@@ -166,13 +164,13 @@ namespace heron
 
         for (uint8_t i = 0; i < M; ++i)
         {
-            this->computeStateDeriv(x, control, k1);
+            this->computeDynamics(x, control, k1, local_fxtdo_state);
             temp = x + 0.5f * this->substep_ * k1;
-            this->computeStateDeriv(temp, control, k2);
+            this->computeDynamics(temp, control, k2, local_fxtdo_state);
             temp = x + 0.5f * this->substep_ * k2;
-            this->computeStateDeriv(temp, control, k3);
+            this->computeDynamics(temp, control, k3, local_fxtdo_state);
             temp = x + this->substep_ * k3;
-            this->computeStateDeriv(temp, control, k4);
+            this->computeDynamics(temp, control, k4, local_fxtdo_state);
 
             x = x + (this->substep_ / 6.0f) * (k1 + 2.0f * k2 + 2.0f * k3 + k4);
         }
@@ -180,6 +178,8 @@ namespace heron
         next_state = x;
         state_der = k4; // 最后一阶段的导数
         this->stateToOutput(next_state, output);
+        if (this->enable_fxtdo_)
+            this->shared_fxtdo_state = local_fxtdo_state;
     }
 
     __device__ inline void USVDynamics::step(float *state,
@@ -191,6 +191,7 @@ namespace heron
                                              const float t,
                                              const float dt)
     {
+        FxTDOState local_fxtdo_state = this->shared_fxtdo_state;
         constexpr int N = this->STATE_DIM;
         const uint8_t M = static_cast<uint8_t>(dt / this->substep_ + 0.5f); // 四舍五入取整
 
@@ -203,23 +204,19 @@ namespace heron
 
         for (uint8_t step = 0; step < M; ++step)
         {
-            this->computeStateDeriv(x, control, k1, theta_s);
-            __syncthreads();
+            this->computeDynamics(x, control, k1, local_fxtdo_state, theta_s);
 #pragma unroll
             for (uint8_t i = 0; i < N; ++i)
                 temp[i] = x[i] + 0.5f * this->substep_ * k1[i];
-            this->computeStateDeriv(temp, control, k2, theta_s);
-            __syncthreads();
+            this->computeDynamics(temp, control, k2, local_fxtdo_state, theta_s);
 #pragma unroll
             for (uint8_t i = 0; i < N; ++i)
                 temp[i] = x[i] + 0.5f * this->substep_ * k2[i];
-            this->computeStateDeriv(temp, control, k3, theta_s);
-            __syncthreads();
+            this->computeDynamics(temp, control, k3, local_fxtdo_state, theta_s);
 #pragma unroll
             for (uint8_t i = 0; i < N; ++i)
                 temp[i] = x[i] + this->substep_ * k3[i];
-            this->computeStateDeriv(temp, control, k4, theta_s);
-            __syncthreads();
+            this->computeDynamics(temp, control, k4, local_fxtdo_state, theta_s);
 
 #pragma unroll
             for (uint8_t i = 0; i < N; ++i)
@@ -231,9 +228,9 @@ namespace heron
             next_state[i] = x[i];
             state_der[i] = k4[i];
         }
-
-        __syncthreads();
         this->stateToOutput(next_state, output);
+        if (this->enable_fxtdo_)
+            this->shared_fxtdo_state = local_fxtdo_state;
     }
 
     // 从输入数据映射到状态

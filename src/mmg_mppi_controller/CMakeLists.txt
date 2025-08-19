@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.8)
-#set(CMAKE_CUDA_ARCHITECTURES 89)
+cmake_minimum_required(VERSION 3.10)
 project(mmg_mppi_controller LANGUAGES C CXX CUDA)
+set(CMAKE_CUDA_ARCHITECTURES native)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
