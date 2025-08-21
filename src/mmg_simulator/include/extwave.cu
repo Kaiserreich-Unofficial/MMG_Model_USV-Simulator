@@ -1,254 +1,199 @@
 #include "extwave.cuh"
-#include <ros/ros.h>
-#include <cuda_runtime.h>
 #include <cufft.h>
-#include <curand_kernel.h>
 #include <cmath>
-#include <stdexcept>
-#include <omp.h>
+#include <vector>
+#include <random>
+#include <ros/ros.h>
 
-constexpr float g = 9.81f;    // 重力加速度 m/s^2
-constexpr float rho = 997.0f; // 海水密度 kg/m^3
-__device__ __host__ float jonswap(float omega, float alpha, float omega_p, float gamma)
+constexpr float g = 9.81f;
+constexpr float rho = 997.0f;
+
+// ------------------------ JONSWAP 波谱 ------------------------
+static float jonswap(float omega, float alpha, float omega_p, float gamma)
 {
-    if (omega <= 0.f)
-        return 0.f;
+    if(omega <= 0.f) return 0.f;
     float sigma = (omega <= omega_p) ? 0.07f : 0.09f;
-    float r = expf(-powf((omega - omega_p), 2.f) / (2.f * sigma * sigma * omega_p * omega_p));
-    float S = alpha * g * g / powf(omega, 5.f) * expf(-1.25f * powf(omega_p / omega, 4.f));
+    float r = expf(-powf((omega - omega_p),2)/(2*sigma*sigma*omega_p*omega_p));
+    float S = alpha * g*g / powf(omega,5.f) * expf(-1.25f * powf(omega_p/omega,4.f));
     return S * powf(gamma, r);
 }
 
-// Generate spectrum Core
-__global__ void generateSpectrumKernel(
-    thrust::complex<float> *spectrum_fx,
-    thrust::complex<float> *spectrum_fy,
-    thrust::complex<float> *spectrum_mz,
-    int N, float df, float alpha, float omega_p, float gamma, float wave_dir, unsigned long long seed)
+// ------------------------ RAO 插值 ------------------------
+static float interpRAO(const std::vector<float> &freqs, const std::vector<float> &RAO, float omega)
 {
-    int k = blockIdx.x * blockDim.x + threadIdx.x + 1;
-    if (k >= N / 2)
-        return;
-
-    curandState state;
-    curand_init(seed, k, 0, &state);
-    float phi = curand_uniform(&state) * 2.f * M_PI;
-
-    float f = k * df;
-    float omega = 2.f * M_PI * f;
-    float S = jonswap(omega, alpha, omega_p, gamma);
-    float A = sqrtf(2.f * S * df);
-
-    thrust::complex<float> spec = A * thrust::polar(1.f, phi);
-
-    spectrum_fx[k] = spec * cosf(wave_dir);
-    spectrum_fy[k] = spec * sinf(wave_dir);
-    spectrum_mz[k] = spec * sinf(2.f * wave_dir);
-
-    // 共轭对称赋值
-    spectrum_fx[N - k] = thrust::conj(spectrum_fx[k]);
-    spectrum_fy[N - k] = thrust::conj(spectrum_fy[k]);
-    spectrum_mz[N - k] = thrust::conj(spectrum_mz[k]);
+    if(omega <= freqs.front()) return RAO.front();
+    if(omega >= freqs.back()) return RAO.back();
+    auto it = std::upper_bound(freqs.begin(), freqs.end(), omega);
+    size_t idx = it - freqs.begin();
+    float w1 = freqs[idx-1], w2 = freqs[idx];
+    float r1 = RAO[idx-1], r2 = RAO[idx];
+    float t = (omega - w1)/(w2 - w1);
+    return r1*(1-t) + r2*t;
 }
 
+// ------------------------ 构造函数 ------------------------
 CudaWaveForceGenerator::CudaWaveForceGenerator(
-    int N_, float dt_, float Hs, float Tp, float waveDirectionRad,
-    float L, float B // NEW: 船长、船宽
-    ) : N(N_), dt(dt_), wave_dir(waveDirectionRad)
+    int N_, float dt_, float Hs_, float Tp_, float waveDirRad,
+    float L_, float B_, float draft_, float waterDepth_
+): N(N_), dt(dt_), Hs(Hs_), Tp(Tp_), wave_dir(waveDirRad),
+   L(L_), B(B_), draft(draft_), water_depth(waterDepth_)
 {
-    T = N * dt;
+    T = N*dt;
 
-    // 计算谱参数
-    float omega_p = 2.f * M_PI / Tp;
-    float alpha = 5.f / 16.f * (Hs * Hs * powf(omega_p, 4)) / (g * g);
-    float df = 1.f / T;
-    float gamma = 3.3f;
+    // RAO 简单经验公式（小长方体, surge/sway）
+    freq_vals.resize(10);
+    RAO_surge.resize(10);
+    RAO_sway.resize(10);
+    for(int i=0;i<10;i++){
+        float f = 0.05f + i*0.05f;
+        float omega = 2*M_PI*f;
+        freq_vals[i] = omega;
+        RAO_surge[i] = 0.3f / sqrt(1+pow(omega*Tp/1.2f,2)); // 经验
+        RAO_sway[i]  = 0.2f / sqrt(1+pow(omega*Tp/1.2f,2));
+    }
 
-    // 保存物理参数
-    this->Hs = Hs;
-    this->L = L;
-    this->B = B;
-
+    // allocate device memory
     allocateCudaMemory();
 
-    // 启动CUDA核函数生成频谱
-    int threadsPerBlock = 256;
-    int blocks = (N / 2 + threadsPerBlock - 1) / threadsPerBlock;
+    // ------------------------ 生成波谱时间序列 ------------------------
+    float df = 1.0f/T;
+    float omega_p = 2*M_PI/Tp;
+    float alpha = 5.f/16.f * Hs*Hs*powf(omega_p,4)/ (g*g);
+    float gamma = 3.3f;
 
-    generateSpectrumKernel<<<blocks, threadsPerBlock>>>(
-        d_spectrum_fx, d_spectrum_fy, d_spectrum_mz,
-        N, df, alpha, omega_p, gamma, wave_dir, 1234ULL);
+    std::vector<thrust::complex<float>> h_spec_ux(N);
+    std::vector<thrust::complex<float>> h_spec_uy(N);
+    std::vector<thrust::complex<float>> h_spec_ax(N);
+    std::vector<thrust::complex<float>> h_spec_ay(N);
 
-    cudaDeviceSynchronize();
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> ud(0.f, 2*M_PI);
 
-    runIFFT(); // 内部会做 RMS 缩放
+    for(int k=1;k<N/2;k++){
+        float f = k*df;
+        float omega = 2*M_PI*f;
+        float S = jonswap(omega, alpha, omega_p, gamma);
+        if(S<=0.f) continue;
+
+        float RAO_x = interpRAO(freq_vals, RAO_surge, omega);
+        float RAO_y = interpRAO(freq_vals, RAO_sway, omega);
+
+        float amp_eta = sqrt(2*S*df); // RMS缩放
+        float phi = ud(rng);
+
+        // 位移 -> 速度/加速度
+        thrust::complex<float> spec_eta = thrust::polar(amp_eta, phi);
+        thrust::complex<float> spec_ux  = spec_eta * thrust::complex<float>(0, omega) * RAO_x;
+        thrust::complex<float> spec_uy  = spec_eta * thrust::complex<float>(0, omega) * RAO_y;
+        thrust::complex<float> spec_ax  = spec_eta * thrust::complex<float>(-omega*omega, 0) * RAO_x;
+        thrust::complex<float> spec_ay  = spec_eta * thrust::complex<float>(-omega*omega, 0) * RAO_y;
+
+        h_spec_ux[k] = spec_ux;  h_spec_ux[N-k] = thrust::conj(spec_ux);
+        h_spec_uy[k] = spec_uy;  h_spec_uy[N-k] = thrust::conj(spec_uy);
+        h_spec_ax[k] = spec_ax;  h_spec_ax[N-k] = thrust::conj(spec_ax);
+        h_spec_ay[k] = spec_ay;  h_spec_ay[N-k] = thrust::conj(spec_ay);
+    }
+
+    CUDA_CHECK(cudaMemcpy(d_spectrum_ux, h_spec_ux.data(), sizeof(thrust::complex<float>)*N, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_spectrum_uy, h_spec_uy.data(), sizeof(thrust::complex<float>)*N, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_spectrum_ax, h_spec_ax.data(), sizeof(thrust::complex<float>)*N, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_spectrum_ay, h_spec_ay.data(), sizeof(thrust::complex<float>)*N, cudaMemcpyHostToDevice));
+
+    runIFFTAndStoreTimeSeries();
 }
 
-CudaWaveForceGenerator::~CudaWaveForceGenerator()
-{
-    freeCudaMemory();
-}
-
+// ------------------------ 内存管理 ------------------------
 void CudaWaveForceGenerator::allocateCudaMemory()
 {
-    cudaMalloc(&d_spectrum_fx, sizeof(thrust::complex<float>) * N);
-    cudaMalloc(&d_spectrum_fy, sizeof(thrust::complex<float>) * N);
-    cudaMalloc(&d_spectrum_mz, sizeof(thrust::complex<float>) * N);
-    cudaMalloc(&d_time_series, sizeof(float) * N * 3);
+    CUDA_CHECK(cudaMalloc(&d_spectrum_ux, sizeof(thrust::complex<float>)*N));
+    CUDA_CHECK(cudaMalloc(&d_spectrum_uy, sizeof(thrust::complex<float>)*N));
+    CUDA_CHECK(cudaMalloc(&d_spectrum_ax, sizeof(thrust::complex<float>)*N));
+    CUDA_CHECK(cudaMalloc(&d_spectrum_ay, sizeof(thrust::complex<float>)*N));
+    CUDA_CHECK(cudaMalloc(&d_time_series, sizeof(float)*N*4));
 }
 
 void CudaWaveForceGenerator::freeCudaMemory()
 {
-    if (d_spectrum_fx)
-        cudaFree(d_spectrum_fx);
-    if (d_spectrum_fy)
-        cudaFree(d_spectrum_fy);
-    if (d_spectrum_mz)
-        cudaFree(d_spectrum_mz);
-    if (d_time_series)
-        cudaFree(d_time_series);
+    if(d_spectrum_ux){cudaFree(d_spectrum_ux); d_spectrum_ux=nullptr;}
+    if(d_spectrum_uy){cudaFree(d_spectrum_uy); d_spectrum_uy=nullptr;}
+    if(d_spectrum_ax){cudaFree(d_spectrum_ax); d_spectrum_ax=nullptr;}
+    if(d_spectrum_ay){cudaFree(d_spectrum_ay); d_spectrum_ay=nullptr;}
+    if(d_time_series){cudaFree(d_time_series); d_time_series=nullptr;}
 }
 
-void CudaWaveForceGenerator::runIFFT()
+// ------------------------ IFFT ------------------------
+__global__ void packIFFTToTimeSeries(thrust::complex<float>* ux, thrust::complex<float>* uy,
+                                     thrust::complex<float>* ax, thrust::complex<float>* ay,
+                                     float* out, int N)
+{
+    int i = blockIdx.x*blockDim.x + threadIdx.x;
+    if(i>=N) return;
+    float invN = 1.0f/N;
+    out[4*i+0] = ux[i].real()*invN;
+    out[4*i+1] = uy[i].real()*invN;
+    out[4*i+2] = ax[i].real()*invN;
+    out[4*i+3] = ay[i].real()*invN;
+}
+
+void CudaWaveForceGenerator::runIFFTAndStoreTimeSeries()
 {
     cufftHandle plan;
-    cufftPlan1d(&plan, N, CUFFT_C2C, 1);
+    CUFFT_CHECK(cufftPlan1d(&plan, N, CUFFT_C2C, 1));
+    CUFFT_CHECK(cufftExecC2C(plan, reinterpret_cast<cufftComplex*>(d_spectrum_ux),
+                                  reinterpret_cast<cufftComplex*>(d_spectrum_ux),
+                                  CUFFT_INVERSE));
+    CUFFT_CHECK(cufftExecC2C(plan, reinterpret_cast<cufftComplex*>(d_spectrum_uy),
+                                  reinterpret_cast<cufftComplex*>(d_spectrum_uy),
+                                  CUFFT_INVERSE));
+    CUFFT_CHECK(cufftExecC2C(plan, reinterpret_cast<cufftComplex*>(d_spectrum_ax),
+                                  reinterpret_cast<cufftComplex*>(d_spectrum_ax),
+                                  CUFFT_INVERSE));
+    CUFFT_CHECK(cufftExecC2C(plan, reinterpret_cast<cufftComplex*>(d_spectrum_ay),
+                                  reinterpret_cast<cufftComplex*>(d_spectrum_ay),
+                                  CUFFT_INVERSE));
+    CUFFT_CHECK(cufftDestroy(plan));
 
-    cufftExecC2C(plan,
-                 reinterpret_cast<cufftComplex *>(d_spectrum_fx),
-                 reinterpret_cast<cufftComplex *>(d_spectrum_fx),
-                 CUFFT_INVERSE);
-
-    cufftExecC2C(plan,
-                 reinterpret_cast<cufftComplex *>(d_spectrum_fy),
-                 reinterpret_cast<cufftComplex *>(d_spectrum_fy),
-                 CUFFT_INVERSE);
-
-    cufftExecC2C(plan,
-                 reinterpret_cast<cufftComplex *>(d_spectrum_mz),
-                 reinterpret_cast<cufftComplex *>(d_spectrum_mz),
-                 CUFFT_INVERSE);
-
-    std::vector<float> h_time_series(N * 3);
-    std::vector<thrust::complex<float>> h_fx(N), h_fy(N), h_mz(N);
-
-    cudaMemcpy(h_fx.data(), d_spectrum_fx, sizeof(thrust::complex<float>) * N, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_fy.data(), d_spectrum_fy, sizeof(thrust::complex<float>) * N, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_mz.data(), d_spectrum_mz, sizeof(thrust::complex<float>) * N, cudaMemcpyDeviceToHost);
-
-#pragma omp parallel for
-    for (int i = 0; i < N; ++i)
-    {
-        // IFFT 后结果需要除以 N 做归一化（cufft 不自动除）
-        h_time_series[3 * i + 0] = h_fx[i].real() / static_cast<float>(N);
-        h_time_series[3 * i + 1] = h_fy[i].real() / static_cast<float>(N);
-        h_time_series[3 * i + 2] = h_mz[i].real() / static_cast<float>(N);
-    }
-
-    // ===== RMS 缩放（更稳健的实现） =====
-    // 水线面面积
-    float Awp = this->L * this->B; // m^2
-    // 目标力 RMS（Fx/Fy）
-    float target_rms_force = 0.5f * rho * g * Awp * this->Hs;
-
-    // 经验杠杆臂用于将力转换成力矩目标（可调）
-    float lever_arm = this->L / 4.0f; // 例如 L/4，视船型调整
-    float target_rms_mz = target_rms_force * lever_arm;
-
-    // 计算当前 RMS：合力（Fx^2 + Fy^2）
-    double sum_sq_force = 0.0;
-    double sum_sq_mz = 0.0;
-    for (int i = 0; i < N; ++i)
-    {
-        double fx = static_cast<double>(h_time_series[3 * i + 0]);
-        double fy = static_cast<double>(h_time_series[3 * i + 1]);
-        double mz = static_cast<double>(h_time_series[3 * i + 2]);
-        sum_sq_force += (fx * fx + fy * fy); // 合力平方和
-        sum_sq_mz += (mz * mz);
-    }
-    double current_rms_force = sqrt(sum_sq_force / static_cast<double>(N));
-    double current_rms_mz = sqrt(sum_sq_mz / static_cast<double>(N));
-
-    // 防止除零与极端放大：设置上下界
-    const double EPS = 1e-12;
-    const double MAX_SCALE = 1e3;  // 上限（根据需要调）
-    const double MIN_SCALE = 1e-3; // 下限（避免被缩为0）
-
-    double scale_force = 1.0;
-    if (current_rms_force > EPS)
-        scale_force = static_cast<double>(target_rms_force) / current_rms_force;
-    // 限制范围并保证为有限值
-    if (!isfinite(scale_force) || isnan(scale_force))
-        ROS_WARN("scale_force is not finite or nan: %f", scale_force);
-        scale_force = 1.0;
-    scale_force = fmax(scale_force, MIN_SCALE);
-    scale_force = fmin(scale_force, MAX_SCALE);
-
-    double scale_mz = 1.0;
-    if (current_rms_mz > EPS)
-        scale_mz = static_cast<double>(target_rms_mz) / current_rms_mz;
-    if (!isfinite(scale_mz) || isnan(scale_mz))
-        ROS_WARN("scale_mz is not finite or nan: %f", scale_mz);
-        scale_mz = 1.0;
-    scale_mz = fmax(scale_mz, MIN_SCALE);
-    scale_mz = fmin(scale_mz, MAX_SCALE);
-
-    // 如果两个 scale 都非常接近 1，则跳过乘法以节省开销
-    bool doScale = (fabs(scale_force - 1.0) > 1e-6) || (fabs(scale_mz - 1.0) > 1e-6);
-
-    if (doScale)
-    {
-#pragma omp parallel for
-        for (int i = 0; i < N; ++i)
-        {
-            // 先把 Fx/Fy 按合力 scale 放大
-            float fx = h_time_series[3 * i + 0];
-            float fy = h_time_series[3 * i + 1];
-            float mz = h_time_series[3 * i + 2];
-
-            double new_fx = fx * scale_force;
-            double new_fy = fy * scale_force;
-            double new_mz = mz * scale_mz;
-
-            // 若某个值不是有限的（极端情况），退回到安全值 0
-            if (!isfinite(new_fx)) new_fx = 0.0;
-            if (!isfinite(new_fy)) new_fy = 0.0;
-            if (!isfinite(new_mz)) new_mz = 0.0;
-
-            h_time_series[3 * i + 0] = static_cast<float>(new_fx);
-            h_time_series[3 * i + 1] = static_cast<float>(new_fy);
-            h_time_series[3 * i + 2] = static_cast<float>(new_mz);
-        }
-    }
-    cudaMemcpy(d_time_series, h_time_series.data(), sizeof(float) * N * 3, cudaMemcpyHostToDevice);
-
-    cufftDestroy(plan);
+    int threads = 256;
+    int blocks = (N+threads-1)/threads;
+    packIFFTToTimeSeries<<<blocks, threads>>>(d_spectrum_ux,d_spectrum_uy,d_spectrum_ax,d_spectrum_ay,d_time_series,N);
+    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-
-Eigen::Vector3f CudaWaveForceGenerator::getWaveForceGlobal(float t)
+// ------------------------ 获取时间序列 ------------------------
+Eigen::Vector4f CudaWaveForceGenerator::getWaveKinematicsGlobal(float t)
 {
-    int idx = static_cast<int>(t / dt) % N;
-    float h_force[3];
-    cudaMemcpy(h_force, d_time_series + 3 * idx, sizeof(float) * 3, cudaMemcpyDeviceToHost);
-    return Eigen::Vector3f(h_force[0], h_force[1], h_force[2]);
+    int idx = static_cast<int>(t/dt) % N;
+    if(idx<0) idx+=N;
+    float h[4];
+    CUDA_CHECK(cudaMemcpy(h, d_time_series+4*idx, sizeof(float)*4, cudaMemcpyDeviceToHost));
+    return Eigen::Vector4f(h[0],h[1],h[2],h[3]);
 }
 
-__host__ Eigen::Vector3f CudaWaveForceGenerator::getWaveForce(const Eigen::Matrix<float, 6, 1> &state, float t)
+// ------------------------ 获取船体波浪力 ------------------------
+Eigen::Vector3f CudaWaveForceGenerator::getWaveForce(const Eigen::Matrix<float,6,1> &state, float t)
 {
     float psi = state(2);
-    float cpsi = cosf(psi);
-    float spsi = sinf(psi);
+    float u_ship = state(3), v_ship = state(4);
 
-    Eigen::Vector3f global_force = getWaveForceGlobal(t);
-    Eigen::Matrix2f R;
-    R << cpsi, spsi,
-        -spsi, cpsi;
+    Eigen::Vector4f kin = getWaveKinematicsGlobal(t);
+    Eigen::Vector2f u_wave_body;
+    u_wave_body <<  cos(psi)*kin(0) + sin(psi)*kin(1),
+                   -sin(psi)*kin(0) + cos(psi)*kin(1);
+    Eigen::Vector2f udot_wave_body;
+    udot_wave_body << cos(psi)*kin(2) + sin(psi)*kin(3),
+                      -sin(psi)*kin(2) + cos(psi)*kin(3);
 
-    Eigen::Vector2f Fg(global_force(0), global_force(1));
-    Eigen::Vector2f Fb = R.transpose() * Fg;
+    Eigen::Vector2f u_rel = u_wave_body - Eigen::Vector2f(u_ship,v_ship);
 
-    Eigen::Vector3f tau;
-    tau << Fb(0), Fb(1), global_force(2);
-    return tau;
+    float Fx = rho*water_depth*B*udot_wave_body(0);
+    float Fy = rho*water_depth*L*udot_wave_body(1);
+    float N  = 0.5f*rho*water_depth*L*B*udot_wave_body.norm(); // 简化偏航
+
+    return Eigen::Vector3f(Fx,Fy,N);
+}
+
+// ------------------------ 析构 ------------------------
+CudaWaveForceGenerator::~CudaWaveForceGenerator()
+{
+    freeCudaMemory();
 }

@@ -4,36 +4,68 @@
 #include <Eigen/Dense>
 #include <cuda_runtime.h>
 #include <thrust/complex.h>
-#include <curand_kernel.h>
 #include <vector>
+#include <cstdio>
+#include <cstdlib>
 
-class CudaWaveForceGenerator {
+// CUDA runtime 错误检查
+#define CUDA_CHECK(err) \
+    do { \
+        cudaError_t err_ = (err); \
+        if (err_ != cudaSuccess) { \
+            fprintf(stderr, "CUDA Error: %s (%s:%d)\n", cudaGetErrorString(err_), __FILE__, __LINE__); \
+            exit(EXIT_FAILURE); \
+        } \
+    } while(0)
+
+// CUFFT 错误检查
+#define CUFFT_CHECK(err) \
+    do { \
+        cufftResult err_ = (err); \
+        if (err_ != CUFFT_SUCCESS) { \
+            fprintf(stderr, "CUFFT Error: %d (%s:%d)\n", err_, __FILE__, __LINE__); \
+            exit(EXIT_FAILURE); \
+        } \
+    } while(0)
+
+class CudaWaveForceGenerator
+{
 public:
-    // 构造参数：N采样点数，dt采样周期，Hs波高，Tp峰值周期，waveDirectionRad波浪方向
-    CudaWaveForceGenerator(int N_, float dt_, float Hs, float Tp, float waveDirectionRad, float L, float B);
+    CudaWaveForceGenerator(
+        int N, float dt, float Hs, float Tp, float waveDirRad,
+        float L, float B, float draft, float waterDepth
+    );
     ~CudaWaveForceGenerator();
 
-    // 获取t时刻全局波浪力（Fx,Fy,Mz）
-    Eigen::Vector3f getWaveForceGlobal(float t);
+    // 返回全局坐标系 u,v,udot,vdot
+    Eigen::Vector4f getWaveKinematicsGlobal(float t);
 
-    // 根据state投影波浪力到船体坐标系τ1,τ2,τ6
-    __host__ Eigen::Vector3f getWaveForce(const Eigen::Matrix<float,6,1>& state, float t);
+    // 返回船体坐标系波浪力 [Fx,Fy,N]
+    Eigen::Vector3f getWaveForce(const Eigen::Matrix<float,6,1> &state, float t);
 
 private:
-    int N;
-    float dt, T;
-    float wave_dir;
-    float Hs, L, B;
-
-    thrust::complex<float>* d_spectrum_fx;
-    thrust::complex<float>* d_spectrum_fy;
-    thrust::complex<float>* d_spectrum_mz;
-
-    float* d_time_series; // IFFT后时域信号：N点，每点3个浮点
-
     void allocateCudaMemory();
     void freeCudaMemory();
-    void runIFFT();
+    void runIFFTAndStoreTimeSeries();
+
+    int N;
+    float dt, Hs, Tp, wave_dir;
+    float L,B,draft,water_depth;
+    float T; // 总模拟时间
+
+    // RAO 系数 (频率依赖)
+    std::vector<float> freq_vals;
+    std::vector<float> RAO_surge;
+    std::vector<float> RAO_sway;
+
+    // IFFT 结果存储 u,v,udot,vdot
+    float *d_time_series = nullptr; // device, length N*4
+
+    // 频域波谱
+    thrust::complex<float> *d_spectrum_ux = nullptr;
+    thrust::complex<float> *d_spectrum_uy = nullptr;
+    thrust::complex<float> *d_spectrum_ax = nullptr;
+    thrust::complex<float> *d_spectrum_ay = nullptr;
 };
 
-#endif // _EXTWAVE_CUH_
+#endif //_EXTWAVE_CUH_

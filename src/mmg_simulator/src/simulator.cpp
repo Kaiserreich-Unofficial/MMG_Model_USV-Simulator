@@ -110,18 +110,20 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "mmg_simulator");
     ros::NodeHandle nh;
 
-    std::string integrator_type;     // 积分器类型
-    float input_limit;               // 控制输入限制
-    Simulator::DynamicParams params; // 水动力参数
-    float L_, W_;                    // 船体尺寸
+    std::string integrator_type;           // 积分器类型
+    float input_limit;                     // 控制输入限制
+    Simulator::DynamicParams params;       // 水动力参数
+    float Length_, Width_, Draft_, Depth_; // 船长、宽、吃水、水深
     // 基本参数
     nh.param<float>("dt", dt, 0.1);
     float speed_scale; // 仿真器速度倍率
     nh.param<float>("speed_scale", speed_scale, 1.f);
     nh.param<std::string>("integrator_type", integrator_type, "rk4");
     nh.param<float>("input_limit", input_limit, 20.0);
-    nh.param<float>("Length", L_, 1.3f);
-    nh.param<float>("Width", W_, 0.98f);
+    nh.param<float>("length", Length_, 1.3f);
+    nh.param<float>("width", Width_, 0.98f);
+    nh.param<float>("water_depth", Depth_, 10.f);
+    nh.param<float>("draft", Draft_, 0.12f);
 
     // 水动力导数
     nh.param<float>("hydrodynamics/mass", params.mass, 38);            // 质量
@@ -142,20 +144,20 @@ int main(int argc, char **argv)
     nh.param<float>("wave/Hs", Hs, .5f);
     nh.param<float>("wave/Tp", Tp, 1.0f);
     nh.param<float>("wave/direction", wave_direction, 0.0);
-    wave_ = std::make_shared<CudaWaveForceGenerator>(wave_N, dt, Hs, Tp, wave_direction / 180.f * M_PI, L_, W_); // 初始化波浪力生成器
+    wave_ = std::make_shared<CudaWaveForceGenerator>(wave_N, dt, Hs, Tp, wave_direction / 180.f * M_PI, Length_, Width_, Depth_, Draft_); // 初始化波浪力生成器
 
     // 风参数
     float beta_w_;  // 初始风向（degree）
     float V_w_;     // 初始风速（m/s）
     float rho_air_; // 空气密度（kg/m³）
-    float Laa_;     // 风距（力矩臂长）
+    // float Laa_;     // 风距（力矩臂长）
 
     nh.param<bool>("wind/enable", wind_enable, true);
     nh.param<float>("wind/direction", beta_w_, 0.0f);
     nh.param<float>("wind/speed", V_w_, 1.0f);
     nh.param<float>("wind/rho", rho_air_, 1.225f);
 
-    wind_ = std::make_shared<WindForceGenerator>(beta_w_ / 180.f * M_PI, V_w_, rho_air_, L_);
+    wind_ = std::make_shared<WindForceGenerator>(beta_w_ / 180.f * M_PI, V_w_, rho_air_, Length_);
 
     // 读取话题名称
     std::string odom_topic, tgt_topic, tgt_odom_topic, left_cmd_topic, right_cmd_topic;
