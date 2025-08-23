@@ -184,9 +184,9 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
 
 def main():
     fxtdo_enabled_list = [True, False]
-    trajectory_type_list = ["eight"]
+    trajectory_type_list = ["circle","eight"]
 
-    max_trials = 3
+    max_trials = 10
     param_product = list(product(fxtdo_enabled_list, trajectory_type_list))
     total_runs = len(param_product)
 

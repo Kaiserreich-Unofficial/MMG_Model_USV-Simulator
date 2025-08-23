@@ -208,6 +208,15 @@ void mpc_timer_cb(const ros::TimerEvent &event_)
 
     Eigen::Vector2f ctrl = controller->getControlSeq().col(0);
     CONTROLLER_T::state_trajectory predict_traj = controller->getTargetStateSeq();
+    if (dynamics.enable_fxtdo_)
+    {                                                                                 // 如果启用了FxTDO
+        state_array nominal_state = predict_traj.col(0);                              // 获取当前名义状态
+        float tau_eff_real[3];                                                        // 实际等效力
+        dynamics.computeTauEff(nominal_state.data(), ctrl(0), ctrl(1), tau_eff_real); // 计算实际等效力
+
+        // FxTDO 积分
+        dynamics.fxtdo_.integrate(tau_eff_real, controller_params.dt_, dynamics.shared_fxtdo_state, nominal_state.data());
+    }
     publishPredictPath(predict_traj); // 发布预测轨迹
 
     std_msgs::Float32 left_cmd, right_cmd;

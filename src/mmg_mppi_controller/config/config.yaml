@@ -24,14 +24,14 @@ hydrodynamics: # 水动力学参数
   Nr: 22.96
 
 fxtdo:
-  L1: 2.2
+  L1: 2.5
   L2: 3.5
-  k1: 2.2
-  k1p: 0.35
-  k1pp: 1.1
-  k2: 4.5
-  k2p: 0.8
-  k2pp: 0.7
+  k1: 3.0
+  k1p: 2.0
+  k1pp: 0.5
+  k2: 3.0
+  k2p: 2.0
+  k2pp: 0.5
   d_inf: 0.3
 
 topics:
@@ -40,13 +40,13 @@ topics:
   left_thruster_cmd: /heron/left_thruster_cmd
   right_thruster_cmd: /heron/right_thruster_cmd
 simulation:
-  speed_scale: 2.0 # 速度缩放因子
+  speed_scale: 2.5 # 速度缩放因子
   time_total: 250 # 仿真总时长
   # 机动圆
-  radius: 10 # 圆轨迹半径
-  omega: 0.06 # 圆轨迹角速度
-  amplitude_x: 12
-  amplitude_y: 20
+  radius: 6 # 圆轨迹半径
+  omega: 0.1 # 圆轨迹角速度
+  amplitude_x: 15
+  amplitude_y: 25
   angular_x: 0.05
   angular_y: 0.025
   x_goal: 50 # 点轨迹目标x坐标
