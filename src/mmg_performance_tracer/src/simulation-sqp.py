@@ -10,14 +10,12 @@ from tqdm import tqdm
 from itertools import product
 import csv
 
-
 def launch_process(cmd, name, cwd=None, stdout=None):
     print(f"[INFO] Launching {name} with command: {' '.join(cmd)}")
     return subprocess.Popen(
         cmd, cwd=cwd, stdout=stdout, stderr=subprocess.STDOUT,
         preexec_fn=os.setsid, text=False
     )
-
 
 def terminate_process(proc, name):
     if proc and proc.poll() is None:
@@ -29,17 +27,15 @@ def terminate_process(proc, name):
         except Exception as e:
             print(f"[WARN] Failed to terminate {name}: {e}")
 
-
 def make_output_dir(param_dict):
+    # 只使用 TrajectoryType 作为子目录名
     param_str = "_".join([f"{k}{str(v).replace(' ', '')}" for k, v in param_dict.items()])
     output_dir = os.path.join(os.getcwd(), param_str)
     os.makedirs(output_dir, exist_ok=True)
     return output_dir
 
-
-def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
+def run_simulation(max_trials, trajectory_type):
     param_dict = {
-        "FxtdoEnabled": fxtdo_enabled,
         "TrajectoryType": trajectory_type
     }
     output_dir = make_output_dir(param_dict)
@@ -48,38 +44,42 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
     optimization_times = []
 
     trial_iter = tqdm(range(1, max_trials + 1),
-                      desc=f"Fxtdo{fxtdo_enabled}_Traj{trajectory_type}",
+                      desc=f"SQP_Traj{trajectory_type}",
                       unit="trial")
     for trial in trial_iter:
         sim_proc = controller_proc = tracer_proc = None
         try:
+            # 1) 启动仿真器
             sim_proc = launch_process(
-                ["roslaunch", "mmg_simulator", "simulator-nogui.launch"],
+                ["roslaunch", "mmg_simulator", "simulator.launch"],
                 "Simulator",
                 cwd=output_dir
             )
             time.sleep(1)
 
+            # 2) 启动 SQP 控制器+轨迹发生器
             controller_cmd = [
-                "roslaunch", "mmg_mppi_controller", "simulation.launch",
-                f"fxtdo_enabled:={str(fxtdo_enabled).lower()}",
+                "roslaunch", "mmg_sqp_controller", "simulation.launch",
                 f"trajectory_type:={trajectory_type}"
             ]
             controller_proc = launch_process(
-                controller_cmd, "Controller + TrajGenerator", cwd=output_dir, stdout=subprocess.PIPE)
+                controller_cmd, "SQP Controller + TrajGenerator", cwd=output_dir, stdout=subprocess.PIPE)
             time.sleep(1)
 
+            # 3) 启动性能记录器
             tracer_proc = launch_process(
                 ["rosrun", "mmg_performance_tracer", "tracer.py", output_dir],
                 "PerformanceTracer",
                 cwd=output_dir
             )
 
+            # 解析控制器日志
             optimization_log_lines = []
             last_optimization_list = []
 
+            # 解析“上次优化时间”
             last_opt_time_pattern = re.compile(
-                r"平均优化时间: [\d.]+ ms, 上次优化时间: ([\d.]+) ms"
+                r"平均优化时间:\s*[\d.]+\s*ms,\s*上次优化时间:\s*([\d.]+)\s*ms"
             )
 
             while True:
@@ -101,7 +101,7 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
                     last_optimization_list.append(last_val)
                     tqdm.write(f"[解析] Trial {trial} Step {len(last_optimization_list)} 上次优化时间: {last_val} ms")
 
-            # 保存每个 trial 的所有优化时间
+            # 保存每个 trial 的所有“上次优化时间”
             if last_optimization_list:
                 per_trial_csv = os.path.join(output_dir, f"last_opt_time_trial{trial}.csv")
                 with open(per_trial_csv, mode="w", newline="", encoding="utf-8") as csvfile:
@@ -111,14 +111,15 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
                         writer.writerow([idx, val])
                 tqdm.write(f"[INFO] 已保存 Trial {trial} 的所有上次优化时间到 {per_trial_csv}")
 
+            # 等待控制器退出（或强制终止）
             try:
                 controller_proc.wait(timeout=2)
-                print("[INFO] Controller + TrajGenerator exited normally.")
+                print("[INFO] SQP Controller + TrajGenerator exited normally.")
             except subprocess.TimeoutExpired:
                 tqdm.write("[WARN] Controller 超时，强制终止")
-                terminate_process(controller_proc, "Controller + TrajGenerator (timeout)")
+                terminate_process(controller_proc, "SQP Controller + TrajGenerator (timeout)")
 
-            # 统计 trial 的平均优化时间（来自日志最后一条）
+            # 统计 trial 的“平均优化时间”（取日志最后一条）
             if optimization_log_lines:
                 last_line = optimization_log_lines[-1]
                 match = re.search(r"平均优化时间:\s*([\d.]+)\s*ms", last_line)
@@ -131,6 +132,7 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
             else:
                 tqdm.write("[WARN] Trial 无任何优化日志")
 
+            # 结束 tracer
             try:
                 tracer_proc.wait(timeout=2)
                 print("[INFO] PerformanceTracer exited.")
@@ -141,22 +143,22 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
         except KeyboardInterrupt:
             print("\n[INTERRUPTED] Ctrl+C received. Cleaning up...")
             terminate_process(tracer_proc, "PerformanceTracer")
-            terminate_process(controller_proc, "Controller + TrajGenerator")
+            terminate_process(controller_proc, "SQP Controller + TrajGenerator")
             terminate_process(sim_proc, "Simulator")
             print("[EXIT] Aborted by user.")
             sys.exit(0)
-
         except Exception as e:
             tqdm.write(f"[ERROR] Unexpected exception in trial {trial}: {e}")
             terminate_process(tracer_proc, "PerformanceTracer")
-            terminate_process(controller_proc, "Controller + TrajGenerator")
+            terminate_process(controller_proc, "SQP Controller + TrajGenerator")
             terminate_process(sim_proc, "Simulator")
             continue
 
+        # 正常收尾：关仿真器
         terminate_process(sim_proc, "Simulator")
         time.sleep(2)
 
-    # 参数组合统计汇总
+    # 本参数组统计
     tqdm.write(f"\n=== [RESULT] Params {param_dict} 优化时间统计 ===")
     if optimization_times:
         mean_time = statistics.mean(optimization_times)
@@ -174,6 +176,7 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
     else:
         tqdm.write("未能提取任何优化时间数据。")
 
+    # 清理 ROS 日志
     try:
         tqdm.write("[INFO] 当前参数组完成，执行 rosclean purge 清理日志...")
         subprocess.run(["rosclean", "purge", "-y"], check=True)
@@ -181,24 +184,19 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
     except Exception as e:
         tqdm.write(f"[WARN] rosclean 执行失败: {e}")
 
-
 def main():
-    fxtdo_enabled_list = [True, False]
-    trajectory_type_list = ["eight", "circle"]
-
+    trajectory_type_list = ["eight"]
     max_trials = 15
-    param_product = list(product(fxtdo_enabled_list, trajectory_type_list))
-    total_runs = len(param_product)
 
+    total_runs = len(trajectory_type_list)
     print(f"[INFO] 总共要跑 {total_runs} 组参数，每组 {max_trials} 次仿真")
 
     try:
-        for fxtdo_enabled, trajectory_type in param_product:
-            run_simulation(max_trials, fxtdo_enabled, trajectory_type)
+        for trajectory_type in trajectory_type_list:
+            run_simulation(max_trials, trajectory_type)
     except KeyboardInterrupt:
         print("\n[INTERRUPTED] 脚本被手动终止，退出。")
         sys.exit(0)
-
 
 if __name__ == "__main__":
     main()

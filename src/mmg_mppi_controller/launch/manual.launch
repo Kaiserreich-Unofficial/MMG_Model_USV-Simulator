@@ -1,6 +1,6 @@
 <launch>
   <!-- 参数声明 -->
-  <arg name="fxtdo_enabled" default="false"/>
+  <arg name="fxtdo_enabled" default="true"/>
   <arg name="trajectory_type" default="circle"/>
 
   <!-- 加载 YAML -->

@@ -53,6 +53,12 @@ private:
     float L,B,draft,water_depth;
     float T; // 总模拟时间
 
+    // Morison 参数
+    float Cd_x, Cd_y;   // 阻力系数
+    float A_x, A_y;     // 投影面积
+    float Cm;           // 惯性系数
+    float V;            // 排水体积
+
     // RAO 系数 (频率依赖)
     std::vector<float> freq_vals;
     std::vector<float> RAO_surge;
