@@ -76,18 +76,37 @@ class PerformanceTracer:
             rospy.logwarn(f"超过 {self.timeout_sec} 秒未收到目标 Odom，保存数据并关闭节点")
             self.__save_logs()
             rospy.signal_shutdown("PerformanceTracer finished")
-
     def __save_logs(self):
         timestamp = time.strftime("%Y%m%d_%H%M%S")
 
-        df_real = pd.DataFrame(self.real_log, columns=[
+        expected_real_len = 8  # x, y, psi, u, v, r, left_thrust, right_thrust
+        expected_target_len = 6  # x, y, psi, u, v, r
+
+        # 筛选长度正确的行
+        filtered_real = [row for row in self.real_log if len(row) == expected_real_len]
+        filtered_target = [row for row in self.target_log if len(row) == expected_target_len]
+
+        if len(filtered_real) != len(self.real_log):
+            rospy.logwarn(f"裁剪掉 {len(self.real_log) - len(filtered_real)} 行 real_log，因为长度不匹配")
+        if len(filtered_target) != len(self.target_log):
+            rospy.logwarn(f"裁剪掉 {len(self.target_log) - len(filtered_target)} 行 target_log，因为长度不匹配")
+
+        # 转为 DataFrame
+        df_real = pd.DataFrame(filtered_real, columns=[
             "x", "y", "psi", "u", "v", "r", "left_thrust", "right_thrust"
         ])
-
-        df_target = pd.DataFrame(self.target_log, columns=[
+        df_target = pd.DataFrame(filtered_target, columns=[
             "x", "y", "psi", "u", "v", "r"
         ])
 
+        # 对齐行数
+        min_rows = min(len(df_real), len(df_target))
+        if len(df_real) != len(df_target):
+            rospy.logwarn(f"df_real 行数 {len(df_real)} 与 df_target 行数 {len(df_target)} 不匹配，裁剪至 {min_rows} 行")
+            df_real = df_real.iloc[:min_rows]
+            df_target = df_target.iloc[:min_rows]
+
+        # 保存
         df_real.to_csv(f"real_odom_{timestamp}.csv", index=False)
         df_target.to_csv(f"target_odom_{timestamp}.csv", index=False)
         rospy.loginfo("所有数据已保存至 CSV 文件！")

@@ -51,7 +51,7 @@ def run_simulation(max_trials, trajectory_type):
         try:
             # 1) 启动仿真器
             sim_proc = launch_process(
-                ["roslaunch", "mmg_simulator", "simulator.launch"],
+                ["roslaunch", "mmg_simulator", "simulator-nogui.launch"],
                 "Simulator",
                 cwd=output_dir
             )

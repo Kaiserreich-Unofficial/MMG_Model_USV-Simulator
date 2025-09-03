@@ -112,7 +112,7 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
                 tqdm.write(f"[INFO] 已保存 Trial {trial} 的所有上次优化时间到 {per_trial_csv}")
 
             try:
-                controller_proc.wait(timeout=2)
+                controller_proc.wait(timeout=5)
                 print("[INFO] Controller + TrajGenerator exited normally.")
             except subprocess.TimeoutExpired:
                 tqdm.write("[WARN] Controller 超时，强制终止")
@@ -132,7 +132,7 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
                 tqdm.write("[WARN] Trial 无任何优化日志")
 
             try:
-                tracer_proc.wait(timeout=2)
+                tracer_proc.wait(timeout=5)
                 print("[INFO] PerformanceTracer exited.")
             except subprocess.TimeoutExpired:
                 tqdm.write("[WARN] Tracer 超时，强制终止")
@@ -186,7 +186,7 @@ def main():
     fxtdo_enabled_list = [True, False]
     trajectory_type_list = ["eight", "circle"]
 
-    max_trials = 15
+    max_trials = 5
     param_product = list(product(fxtdo_enabled_list, trajectory_type_list))
     total_runs = len(param_product)
 
