@@ -212,7 +212,7 @@ void mpc_timer_cb(const ros::TimerEvent &event_)
         dynamics.computeTauEff(nominal_state.data(), ctrl(0), ctrl(1), tau_eff_real); // 计算实际等效力
 
         // FxTDO 积分
-        dynamics.fxtdo_.integrate(tau_eff_real, controller_params.dt_, dynamics.shared_fxtdo_state, nominal_state.data());
+        dynamics.fxtdo_.integrate(tau_eff_real, controller_params.dt_, dynamics.shared_fxtdo_state, observed_state.data());
     }
     publishPredictPath(predict_traj); // 发布预测轨迹
 
