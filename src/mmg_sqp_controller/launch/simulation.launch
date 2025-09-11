@@ -1,0 +1,11 @@
+<launch>
+    <arg name="trajectory_type" default="eight"/>
+    <!-- 加载整个 YAML 文件 -->
+    <rosparam command="load" file="$(find mmg_sqp_controller)/config/config.yaml" />
+    <!-- 覆盖关键参数 -->
+    <param name="simulation/traj_type" value="$(arg trajectory_type)" />
+    <!-- 启动轨迹生成 -->
+    <node pkg="mmg_sqp_controller" type="traj_generator.py" name="TrajGenerator" output="screen" required="true" />
+    <!-- 启动轨迹生成 -->
+    <node pkg="mmg_sqp_controller" type="controller.py" name="MPCController" output="screen" required="true" />
+  </launch>
