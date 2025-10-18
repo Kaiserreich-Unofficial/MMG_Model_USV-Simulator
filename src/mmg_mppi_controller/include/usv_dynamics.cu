@@ -96,7 +96,7 @@ namespace heron
         {
             nu_dot(0) += inv_M_(0, 0) * fxtdo_state.fd_hat[0];
             nu_dot(1) += inv_M_(1, 1) * fxtdo_state.fd_hat[1];
-            nu_dot(2) += inv_M_(2, 2) * fxtdo_state.fd_hat[2];
+            // nu_dot(2) += inv_M_(2, 2) * fxtdo_state.fd_hat[2];
         }
 
         state_der.tail(3) = nu_dot;
@@ -130,7 +130,7 @@ namespace heron
         {
             state_der[3] += inv_M00 * fxtdo_state.fd_hat[0];
             state_der[4] += inv_M11 * fxtdo_state.fd_hat[1];
-            state_der[5] += inv_M22 * fxtdo_state.fd_hat[2];
+            // state_der[5] += inv_M22 * fxtdo_state.fd_hat[2];
         }
     }
 
