@@ -2,11 +2,17 @@
   <!-- 参数声明 -->
   <arg name="fxtdo_enabled" default="true"/>
   <arg name="trajectory_type" default="circle"/>
+  <arg name="horizon" default="100"/>
+  <arg name="x_weight" default="[100, 100, 10, 1, 0.1, 1]"/>
+  <arg name="stddev" default="10.0"/>
 
   <!-- 加载 YAML -->
   <rosparam command="load" file="$(find mmg_mppi_controller)/config/config.yaml" />
 
   <!-- 覆盖关键参数 -->
+  <param name="horizon" value="$(arg horizon)" />
+  <param name="x_weight" value="$(arg x_weight)" />
+  <param name="stddev" value="$(arg stddev)" />
   <param name="fxtdo/enabled" value="$(arg fxtdo_enabled)" />
   <param name="simulation/traj_type" value="$(arg trajectory_type)" />
 

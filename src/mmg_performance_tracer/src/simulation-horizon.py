@@ -37,18 +37,15 @@ def make_output_dir(param_dict):
     return output_dir
 
 
-def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
-    param_dict = {
-        "FxtdoEnabled": fxtdo_enabled,
-        "TrajectoryType": trajectory_type
-    }
+def run_simulation(max_trials, horizon):
+    param_dict = {"Horizon": horizon}
     output_dir = make_output_dir(param_dict)
     print(f"[INFO] 输出目录: {output_dir}")
 
     optimization_times = []
 
     trial_iter = tqdm(range(1, max_trials + 1),
-                      desc=f"Fxtdo{fxtdo_enabled}_Traj{trajectory_type}",
+                      desc=f"Horizon{horizon}",
                       unit="trial")
     for trial in trial_iter:
         sim_proc = controller_proc = tracer_proc = None
@@ -62,8 +59,7 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
 
             controller_cmd = [
                 "roslaunch", "mmg_mppi_controller", "simulation.launch",
-                f"fxtdo_enabled:={str(fxtdo_enabled).lower()}",
-                f"trajectory_type:={trajectory_type}"
+                f"horizon:={horizon}"
             ]
             controller_proc = launch_process(
                 controller_cmd, "Controller + TrajGenerator", cwd=output_dir, stdout=subprocess.PIPE)
@@ -101,7 +97,6 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
                     last_optimization_list.append(last_val)
                     tqdm.write(f"[解析] Trial {trial} Step {len(last_optimization_list)} 上次优化时间: {last_val} ms")
 
-            # 保存每个 trial 的所有优化时间
             if last_optimization_list:
                 per_trial_csv = os.path.join(output_dir, f"last_opt_time_trial{trial}.csv")
                 with open(per_trial_csv, mode="w", newline="", encoding="utf-8") as csvfile:
@@ -118,7 +113,6 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
                 tqdm.write("[WARN] Controller 超时，强制终止")
                 terminate_process(controller_proc, "Controller + TrajGenerator (timeout)")
 
-            # 统计 trial 的平均优化时间（来自日志最后一条）
             if optimization_log_lines:
                 last_line = optimization_log_lines[-1]
                 match = re.search(r"平均优化时间:\s*([\d.]+)\s*ms", last_line)
@@ -156,7 +150,6 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
         terminate_process(sim_proc, "Simulator")
         time.sleep(2)
 
-    # 参数组合统计汇总
     tqdm.write(f"\n=== [RESULT] Params {param_dict} 优化时间统计 ===")
     if optimization_times:
         mean_time = statistics.mean(optimization_times)
@@ -183,18 +176,14 @@ def run_simulation(max_trials, fxtdo_enabled, trajectory_type):
 
 
 def main():
-    fxtdo_enabled_list = [True, False]
-    trajectory_type_list = ["circle"]
-
+    horizon_list = [50, 75, 100]
     max_trials = 30
-    param_product = list(product(fxtdo_enabled_list, trajectory_type_list))
-    total_runs = len(param_product)
 
-    print(f"[INFO] 总共要跑 {total_runs} 组参数，每组 {max_trials} 次仿真")
+    print(f"[INFO] 总共要跑 {len(horizon_list)} 个 horizon，每个 {max_trials} 次仿真")
 
     try:
-        for fxtdo_enabled, trajectory_type in param_product:
-            run_simulation(max_trials, fxtdo_enabled, trajectory_type)
+        for horizon in horizon_list:
+            run_simulation(max_trials, horizon)
     except KeyboardInterrupt:
         print("\n[INTERRUPTED] 脚本被手动终止，退出。")
         sys.exit(0)

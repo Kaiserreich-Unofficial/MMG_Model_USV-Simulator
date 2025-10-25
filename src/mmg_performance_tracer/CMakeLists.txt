@@ -169,6 +169,7 @@ catkin_install_python(PROGRAMS
   src/tracer.py
   src/simulation.py
   src/simulation-sqp.py
+  src/simulation-horizon.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

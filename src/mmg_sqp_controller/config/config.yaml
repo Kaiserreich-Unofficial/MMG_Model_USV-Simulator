@@ -25,12 +25,12 @@ topics:
 simulation:
   speed_scale: 5.0 # 速度缩放因子
   time_total: 250 # 仿真总时长
-  radius: 6 # 圆轨迹半径
-  omega: 0.1 # 圆轨迹角速度
-  amplitude_x: 5    # 横向更小
-  amplitude_y: 20    # 纵向更大
-  angular_x: 0.05    # 横向频率更低
-  angular_y: 0.025    # 纵向频率更低
+  radius: 5 # 圆轨迹半径
+  omega: 0.12 # 圆轨迹角速度
+  amplitude_x: 6 # 横向更小
+  amplitude_y: 10 # 纵向更大
+  angular_x: 0.1 # 横向频率更低
+  angular_y: 0.05 # 纵向频率更低
   x_goal: 50 # 点轨迹目标x坐标
   y_goal: 50 # 点轨迹目标y坐标
   psi_goal: 3.14159 # 点轨迹目标航向
