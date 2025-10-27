@@ -4,7 +4,7 @@
   <arg name="trajectory_type" default="circle"/>
   <arg name="horizon" default="100"/>
   <arg name="x_weight" default="[100, 100, 10, 1, 0.1, 1]"/>
-  <arg name="stddev" default="10.0"/>
+  <arg name="stddev" default="5.0"/>
 
   <!-- 加载 YAML -->
   <rosparam command="load" file="$(find mmg_mppi_controller)/config/config.yaml" />
