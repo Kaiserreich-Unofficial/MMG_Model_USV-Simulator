@@ -170,6 +170,8 @@ catkin_install_python(PROGRAMS
   src/simulation.py
   src/simulation-sqp.py
   src/simulation-horizon.py
+  src/simulation-weight.py
+  src/simulation-stddev.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
