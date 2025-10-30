@@ -155,7 +155,7 @@ def run_simulation(max_trials, stddev_value):
         tqdm.write("未能提取任何优化时间数据。")
 
 def main():
-    stddev_list = [5.0, 10.0, 15.0, 20.0]
+    stddev_list = [1.0, 5.0, 10.0, 15.0]
     max_trials = 30
     print(f"[INFO] 总共要跑 {len(stddev_list)} 组 stddev，每组 {max_trials} 次仿真")
 

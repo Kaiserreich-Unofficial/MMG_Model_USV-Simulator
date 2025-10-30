@@ -185,8 +185,8 @@ def run_simulation(max_trials, trajectory_type):
         tqdm.write(f"[WARN] rosclean 执行失败: {e}")
 
 def main():
-    trajectory_type_list = ["eight"]
-    max_trials = 15
+    trajectory_type_list = ["eight", "circle"]
+    max_trials = 100
 
     total_runs = len(trajectory_type_list)
     print(f"[INFO] 总共要跑 {total_runs} 组参数，每组 {max_trials} 次仿真")

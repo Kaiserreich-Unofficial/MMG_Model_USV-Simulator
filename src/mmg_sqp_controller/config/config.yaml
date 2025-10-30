@@ -1,7 +1,7 @@
 horizon: 100 # 单位：步
 dt: 0.05 # 单位：秒
-x_weight: [1.0, 1.0, 0.5, 0.0, 0.0, 0.0] # 状态变量权重
-u_weight: [0.1, 0.1] # 控制变量权重
+x_weight: [100.0, 100.0, 10.0, 1.0, 0.1, 1.0] # 状态变量权重
+u_weight: [0.01, 0.01] # 控制变量权重
 input_limit: 20.0 # 控制器输入限制
 
 hydrodynamics: # 水动力学参数
@@ -24,9 +24,9 @@ topics:
 
 simulation:
   speed_scale: 5.0 # 速度缩放因子
-  time_total: 250 # 仿真总时长
-  radius: 5 # 圆轨迹半径
-  omega: 0.12 # 圆轨迹角速度
+  time_total: 150 # 仿真总时长
+  radius: 8 # 圆轨迹半径
+  omega: 0.1 # 圆轨迹角速度
   amplitude_x: 6 # 横向更小
   amplitude_y: 10 # 纵向更大
   angular_x: 0.1 # 横向频率更低
