@@ -84,10 +84,10 @@ namespace heron
     public:
         bool enable_fxtdo_;
         FxTDO fxtdo_;
-        FxTDOState shared_fxtdo_state;
+        FxTDOState fxtdo_state;
+        HydroDynamicParams hydroparams_; // 水动力学参数
 
     private:
-        HydroDynamicParams hydroparams_;
         float input_limit_;
         float substep_;
         Eigen::Matrix3f inv_M_;

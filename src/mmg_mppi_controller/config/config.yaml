@@ -20,12 +20,12 @@ hydrodynamics: # 水动力学参数
 fxtdo:
     L1: 1.0
     L2: 1.0
-    k1: 3.5
-    k1p: 1.0
-    k1pp: 0.5
-    k2: 3.0
-    k2p: 1.0
-    k2pp: 0.5
+    k1: 2.0
+    k1p: 0.6
+    k1pp: 3.0
+    k2: 2.0
+    k2p: 0.6
+    k2pp: 3.0
     d_inf: 0.33
 
 topics:

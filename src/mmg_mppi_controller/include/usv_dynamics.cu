@@ -26,52 +26,56 @@ namespace heron
         substep_ = substep;
 
         Eigen::Matrix3f M = (Eigen::Vector3f() << hydroparams_.mass - hydroparams_.X_u_dot,
-                          hydroparams_.mass - hydroparams_.Y_v_dot,
-                          hydroparams_.Iz - hydroparams_.N_r_dot).finished().asDiagonal();
+                             hydroparams_.mass - hydroparams_.Y_v_dot,
+                             hydroparams_.Iz - hydroparams_.N_r_dot)
+                                .finished()
+                                .asDiagonal();
         inv_M_ = M.inverse();
 
         D_ = (Eigen::Vector3f() << hydroparams_.X_u, hydroparams_.Y_v, hydroparams_.N_r).finished().asDiagonal();
-
-        if (enable_fxtdo_)
-        {
-            fxtdo_ = FxTDO(hydroparams_.mass, hydroparams_.Iz,
-                            hydroparams_.X_u_dot, hydroparams_.Y_v_dot, hydroparams_.N_r_dot);
-        }
     }
 
     // ---------------- computeTauEff ----------------
     __host__ __device__ void USVDynamics::computeTauEff(const float *state, float Tl, float Tr, float *tau_eff) const
     {
-        float u = state[3];
-        float v = state[4];
-        float r = state[5];
+        const float u = state[3];
+        const float v = state[4];
+        const float r = state[5];
 
-        float m = hydroparams_.mass;
-        float Xu_dot = hydroparams_.X_u_dot;
-        float Yv_dot = hydroparams_.Y_v_dot;
-        float Xu = hydroparams_.X_u;
-        float Yv = hydroparams_.Y_v;
-        float Nr = hydroparams_.N_r;
-        float B = hydroparams_.B;
+        const float m = hydroparams_.mass;
+        const float Iz = hydroparams_.Iz;
+        const float Xu_dot = hydroparams_.X_u_dot;
+        const float Yv_dot = hydroparams_.Y_v_dot;
+        const float Nr_dot = hydroparams_.N_r_dot;
+        const float Xu = hydroparams_.X_u;
+        const float Yv = hydroparams_.Y_v;
+        const float Nr = hydroparams_.N_r;
+        const float B = hydroparams_.B;
 
         // 推进力
-        float tau0 = Tl + Tr;
-        float tau1 = 0.0f;
-        float tau2 = 0.5f * B * (Tl - Tr);
+        const float tau0 = Tl + Tr;
+        const float tau1 = 0.0f;
+        const float tau2 = 0.5f * B * (Tl - Tr);
 
         // 科氏力
-        float C0 = -(m - Yv_dot) * v * r;
-        float C1 = (m - Xu_dot) * u * r;
-        float C2 = 0.0f;
+        const float C0 = -(m - Yv_dot) * v * r;
+        const float C1 = (m - Xu_dot) * u * r;
+        const float C2 = (Yv_dot - Xu_dot) * u * v;
 
         // 阻尼
-        float D0 = Xu * u;
-        float D1 = Yv * v;
-        float D2 = Nr * r;
+        const float D0 = Xu * u;
+        const float D1 = Yv * v;
+        const float D2 = Nr * r;
 
         tau_eff[0] = tau0 - C0 - D0;
         tau_eff[1] = tau1 - C1 - D1;
         tau_eff[2] = tau2 - C2 - D2;
+        if (this->enable_fxtdo_)
+        {
+            tau_eff[0] += this->fxtdo_state.fd_hat[0];
+            tau_eff[1] += this->fxtdo_state.fd_hat[1];
+            tau_eff[2] += this->fxtdo_state.fd_hat[2];
+        }
     }
 
     // ---------------- computeDynamics (host) ----------------
@@ -91,13 +95,6 @@ namespace heron
         nu_dot(0) = inv_M_(0, 0) * tau_eff[0];
         nu_dot(1) = inv_M_(1, 1) * tau_eff[1];
         nu_dot(2) = inv_M_(2, 2) * tau_eff[2];
-
-        if (enable_fxtdo_)
-        {
-            nu_dot(0) += inv_M_(0, 0) * fxtdo_state.fd_hat[0];
-            nu_dot(1) += inv_M_(1, 1) * fxtdo_state.fd_hat[1];
-            // nu_dot(2) += inv_M_(2, 2) * fxtdo_state.fd_hat[2];
-        }
 
         state_der.tail(3) = nu_dot;
     }
@@ -125,13 +122,6 @@ namespace heron
         state_der[3] = inv_M00 * tau_eff[0];
         state_der[4] = inv_M11 * tau_eff[1];
         state_der[5] = inv_M22 * tau_eff[2];
-
-        if (enable_fxtdo_)
-        {
-            state_der[3] += inv_M00 * fxtdo_state.fd_hat[0];
-            state_der[4] += inv_M11 * fxtdo_state.fd_hat[1];
-            // state_der[5] += inv_M22 * fxtdo_state.fd_hat[2];
-        }
     }
 
     // ---------------- step (host) ----------------
@@ -139,7 +129,6 @@ namespace heron
                            Eigen::Ref<state_array> state_der, const Eigen::Ref<const control_array> &control,
                            Eigen::Ref<output_array> output, const float t, const float dt)
     {
-        FxTDOState local_fxtdo_state = shared_fxtdo_state;
         const uint8_t M = static_cast<uint8_t>(dt / substep_ + 0.5f);
 
         state_array x = state;
@@ -147,13 +136,13 @@ namespace heron
 
         for (uint8_t i = 0; i < M; ++i)
         {
-            computeDynamics(x, control, k1, local_fxtdo_state);
+            computeDynamics(x, control, k1, this->fxtdo_state);
             temp = x + 0.5f * substep_ * k1;
-            computeDynamics(temp, control, k2, local_fxtdo_state);
+            computeDynamics(temp, control, k2, this->fxtdo_state);
             temp = x + 0.5f * substep_ * k2;
-            computeDynamics(temp, control, k3, local_fxtdo_state);
+            computeDynamics(temp, control, k3, this->fxtdo_state);
             temp = x + substep_ * k3;
-            computeDynamics(temp, control, k4, local_fxtdo_state);
+            computeDynamics(temp, control, k4, this->fxtdo_state);
 
             x += (substep_ / 6.0f) * (k1 + 2.0f * k2 + 2.0f * k3 + k4);
         }
@@ -168,34 +157,36 @@ namespace heron
                                              float *control, float *output, float *theta_s,
                                              const float t, const float dt)
     {
-        FxTDOState local_fxtdo_state = shared_fxtdo_state;
         constexpr int N = static_cast<int>(USVDynamicsParams::StateIndex::NUM_STATES);
         const uint8_t M = static_cast<uint8_t>(dt / substep_ + 0.5f);
 
         float x[N], k1[N], k2[N], k3[N], k4[N], temp[N];
-        #pragma unroll
+#pragma unroll
         for (int i = 0; i < N; ++i)
             x[i] = state[i];
 
         for (uint8_t step = 0; step < M; ++step)
         {
-            computeDynamics(x, control, k1, local_fxtdo_state, theta_s);
-            #pragma unroll
-            for (uint16_t i = 0; i < N; ++i) temp[i] = x[i] + 0.5f * substep_ * k1[i];
-            computeDynamics(temp, control, k2, local_fxtdo_state, theta_s);
-            #pragma unroll
-            for (uint16_t i = 0; i < N; ++i) temp[i] = x[i] + 0.5f * substep_ * k2[i];
-            computeDynamics(temp, control, k3, local_fxtdo_state, theta_s);
-            #pragma unroll
-            for (uint16_t i = 0; i < N; ++i) temp[i] = x[i] + substep_ * k3[i];
-            computeDynamics(temp, control, k4, local_fxtdo_state, theta_s);
+            computeDynamics(x, control, k1, this->fxtdo_state, theta_s);
+#pragma unroll
+            for (uint16_t i = 0; i < N; ++i)
+                temp[i] = x[i] + 0.5f * substep_ * k1[i];
+            computeDynamics(temp, control, k2, this->fxtdo_state, theta_s);
+#pragma unroll
+            for (uint16_t i = 0; i < N; ++i)
+                temp[i] = x[i] + 0.5f * substep_ * k2[i];
+            computeDynamics(temp, control, k3, this->fxtdo_state, theta_s);
+#pragma unroll
+            for (uint16_t i = 0; i < N; ++i)
+                temp[i] = x[i] + substep_ * k3[i];
+            computeDynamics(temp, control, k4, this->fxtdo_state, theta_s);
 
-            #pragma unroll
+#pragma unroll
             for (uint16_t i = 0; i < N; ++i)
                 x[i] += (substep_ / 6.0f) * (k1[i] + 2.0f * k2[i] + 2.0f * k3[i] + k4[i]);
         }
 
-        #pragma unroll
+#pragma unroll
         for (uint16_t i = 0; i < N; ++i)
         {
             next_state[i] = x[i];

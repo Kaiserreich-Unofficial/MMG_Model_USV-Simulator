@@ -107,8 +107,6 @@ void observer_cb(const nav_msgs::Odometry::ConstPtr &state)
     observed_state[3] = state->twist.twist.linear.x;
     observed_state[4] = state->twist.twist.linear.y;
     observed_state[5] = state->twist.twist.angular.z;
-    if (dynamics.enable_fxtdo_)
-        memcpy(dynamics.fxtdo_.observed_state, observed_state.data(), sizeof(float) * DYN_T::STATE_DIM); // 更新FxTDO观测状态
 }
 
 // Target callback
@@ -200,19 +198,17 @@ void mpc_timer_cb(const ros::TimerEvent &event_)
     std_msgs::Float32MultiArray d_hat_msg;
     d_hat_msg.data.resize(3);
     for (int i = 0; i < 3; ++i)
-        d_hat_msg.data[i] = dynamics.shared_fxtdo_state.fd_hat[i];
+        d_hat_msg.data[i] = dynamics.fxtdo_state.fd_hat[i];
     d_hat_pub.publish(d_hat_msg); // 发布扰动
 
     Eigen::Vector2f ctrl = controller->getControlSeq().col(0);
+    const float Tl = ctrl(0);
+    const float Tr = ctrl(1);
     CONTROLLER_T::state_trajectory predict_traj = controller->getTargetStateSeq();
     if (dynamics.enable_fxtdo_)
-    {                                                                                 // 如果启用了FxTDO
-        state_array nominal_state = predict_traj.col(0);                              // 获取当前名义状态
-        float tau_eff_real[3];                                                        // 实际等效力
-        dynamics.computeTauEff(nominal_state.data(), ctrl(0), ctrl(1), tau_eff_real); // 计算实际等效力
-
+    { // 如果启用了FxTDO
         // FxTDO 积分
-        dynamics.fxtdo_.integrate(tau_eff_real, controller_params.dt_, dynamics.shared_fxtdo_state, observed_state.data());
+        dynamics.fxtdo_.integrate(controller_params.dt_, dynamics.fxtdo_state, observed_state.data(), Tl, Tr);
     }
     publishPredictPath(predict_traj); // 发布预测轨迹
 
@@ -271,6 +267,15 @@ int main(int argc, char **argv)
         nh.param<float>("fxtdo/k2p", dynamics.fxtdo_.k2p, 0.8);
         nh.param<float>("fxtdo/k2pp", dynamics.fxtdo_.k2pp, 0.7);
         nh.param<float>("fxtdo/d_inf", dynamics.fxtdo_.d_inf, 0.3);
+        // 设置FXTDO的预测动力学参数
+        dynamics.fxtdo_.m = dynamics.hydroparams_.mass;
+        dynamics.fxtdo_.Iz = dynamics.hydroparams_.Iz;
+        dynamics.fxtdo_.X_u = dynamics.hydroparams_.X_u;
+        dynamics.fxtdo_.Xu_dot = dynamics.hydroparams_.X_u_dot;
+        dynamics.fxtdo_.Y_v = dynamics.hydroparams_.Y_v;
+        dynamics.fxtdo_.Yv_dot = dynamics.hydroparams_.Y_v_dot;
+        dynamics.fxtdo_.N_r = dynamics.hydroparams_.N_r;
+        dynamics.fxtdo_.Nr_dot = dynamics.hydroparams_.N_r_dot;
     }
 
     // 参考轨迹初始化
