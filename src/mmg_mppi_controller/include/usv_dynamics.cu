@@ -70,12 +70,6 @@ namespace heron
         tau_eff[0] = tau0 - C0 - D0;
         tau_eff[1] = tau1 - C1 - D1;
         tau_eff[2] = tau2 - C2 - D2;
-        if (this->enable_fxtdo_)
-        {
-            tau_eff[0] += this->fxtdo_state.fd_hat[0];
-            tau_eff[1] += this->fxtdo_state.fd_hat[1];
-            tau_eff[2] += this->fxtdo_state.fd_hat[2];
-        }
     }
 
     // ---------------- computeDynamics (host) ----------------

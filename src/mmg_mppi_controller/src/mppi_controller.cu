@@ -202,13 +202,17 @@ void mpc_timer_cb(const ros::TimerEvent &event_)
     d_hat_pub.publish(d_hat_msg); // 发布扰动
 
     Eigen::Vector2f ctrl = controller->getControlSeq().col(0);
-    const float Tl = ctrl(0);
-    const float Tr = ctrl(1);
     CONTROLLER_T::state_trajectory predict_traj = controller->getTargetStateSeq();
     if (dynamics.enable_fxtdo_)
     { // 如果启用了FxTDO
         // FxTDO 积分
-        dynamics.fxtdo_.integrate(controller_params.dt_, dynamics.fxtdo_state, observed_state.data(), Tl, Tr);
+        dynamics.fxtdo_.integrate(controller_params.dt_, dynamics.fxtdo_state, observed_state.data(), ctrl(0), ctrl(1));
+        float Fx = dynamics.fxtdo_state.fd_hat[0];
+        float Mz = dynamics.fxtdo_state.fd_hat[2];
+        float B = dynamics.hydroparams_.B;
+
+        ctrl(0) -= 0.5f * Fx;
+        ctrl(1) -= 0.5f * Fx;
     }
     publishPredictPath(predict_traj); // 发布预测轨迹
 
