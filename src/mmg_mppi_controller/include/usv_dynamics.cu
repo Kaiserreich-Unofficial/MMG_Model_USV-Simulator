@@ -46,7 +46,6 @@ namespace heron
         const float Iz = hydroparams_.Iz;
         const float Xu_dot = hydroparams_.X_u_dot;
         const float Yv_dot = hydroparams_.Y_v_dot;
-        const float Nr_dot = hydroparams_.N_r_dot;
         const float Xu = hydroparams_.X_u;
         const float Yv = hydroparams_.Y_v;
         const float Nr = hydroparams_.N_r;

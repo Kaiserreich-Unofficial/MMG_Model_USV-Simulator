@@ -55,75 +55,110 @@ namespace heron
 
         __host__ __device__ void integrate(float dt, FxTDOState &state, const float obs_state[6], float Tl, float Tr)
         {
-            float nu_obs[3] = {obs_state[3], obs_state[4], obs_state[5]};
-            float z1_meas[3];
-            z1_meas[0] = (m - Xu_dot) * obs_state[3];
-            z1_meas[1] = (m - Yv_dot) * obs_state[4];
-            z1_meas[2] = (Iz - Nr_dot) * obs_state[5];
+             // 在 integrate() 中，先准备 M_vals:
+                float M_vals[3] = {
+                    (m - Xu_dot),
+                    (m - Yv_dot),
+                    (Iz - Nr_dot)};
 
-            float T_eff[3];
-            float nu_hat[3] = {state.z1_hat[0] / (m - Xu_dot), state.z1_hat[1] / (m - Yv_dot), state.z1_hat[2] / (Iz - Nr_dot)};
-            computeTauEff(nu_hat, Tl, Tr, T_eff);
+            // ---- Compute measurements only once per dt ----
+            float z1_meas[3] = {
+                M_vals[0] * obs_state[3],
+                M_vals[1] * obs_state[4],
+                M_vals[2] * obs_state[5]};
 
-            auto diff = [&](const float z1_hat_in[3], const float fd_hat_in[3], const float z1_real_in[3], float dz[6])
+            // ---- 子步数 ----
+            int N = max(1, (int)roundf(dt / sub_dt));
+            float h = dt / N; // 真实子步长（避免 dt/sub_dt 非整数造成漂移）
+
+            for (int step = 0; step < N; ++step)
             {
+                float nu_hat[3] = {
+                    state.z1_hat[0] / M_vals[0],
+                    state.z1_hat[1] / M_vals[1],
+                    state.z1_hat[2] / M_vals[2]};
+
+                float T_eff[3];
+                computeTauEff(nu_hat, Tl, Tr, T_eff);
+
+
+
+                // 替换你当前 diff 的实现为下面这个：
+                auto diff = [&](const float z1_hat_in[3], const float fd_hat_in[3], float dz[6])
+                {
+#pragma unroll
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        const float M_i = M_vals[i];
+                        // 原始误差（z 量纲）
+                        float e_z = z1_meas[i] - z1_hat_in[i];
+                        // 归一化误差（nu 量纲）
+                        float e_nu = e_z / M_i;
+                        float s = (e_nu > 0) - (e_nu < 0);
+                        float abs_en = fabsf(e_nu);
+
+                        // 计算 phi 在 nu（归一化）域的幂次，但映射回 z 域需要乘以 M 的各次幂：
+                        // phi1_z = k1 * s * sqrt(|e_z|) + k1p * s * |e_z| + k1pp * s * |e_z|^{1/(1-d)}
+                        // = k1 * M_i^{1/2} * s * sqrt(|e_nu|)
+                        //   + k1p * M_i * s * |e_nu|
+                        //   + k1pp * M_i^{1/(1-d)} * s * |e_nu|^{1/(1-d)}
+                        float M_pow_half = sqrtf(M_i);
+                        float M_pow_p1 = powf(M_i, 1.0f / (1.0f - d_inf)); // for k1pp term
+
+                        float phi1_z = k1 * M_pow_half * s * sqrtf(abs_en) + k1p * M_i * s * abs_en + k1pp * M_pow_p1 * s * powf(abs_en, 1.0f / (1.0f - d_inf));
+
+                        // phi2_z similar mapping:
+                        // phi2_z = k2 * s + k2p * M_i * s * |e_nu| + k2pp * M_i^{(1+d)/(1-d)} * s * |e_nu|^{(1+d)/(1-d)}
+                        float M_pow_p2 = powf(M_i, (1.0f + d_inf) / (1.0f - d_inf));
+                        float phi2_z = k2 * s + k2p * M_i * s * abs_en + k2pp * M_pow_p2 * s * powf(abs_en, (1.0f + d_inf) / (1.0f - d_inf));
+
+                        // z1_hat_dot = fd_hat + T_eff + L1 * phi1_z
+                        dz[i] = fd_hat_in[i] + T_eff[i] + L1 * phi1_z;
+                        // fd_hat_dot = L2 * phi2_z
+                        dz[i + 3] = L2 * phi2_z;
+                    }
+                };
+
+                float k1_[6], k2_[6], k3_[6], k4_[6];
+                float zh[3], fh[3];
+
+                // RK4 - k1
+                diff(state.z1_hat, state.fd_hat, k1_);
+
+                // k2
 #pragma unroll
                 for (int i = 0; i < 3; ++i)
                 {
-                    // 误差
-                    const float e = z1_real_in[i] - z1_hat_in[i];
-                    const float s = (e > 0) - (e < 0); // 符号函数
-                    const float abs_e = fabsf(e);
-
-                    // 非线性修正项 phi1, phi2（保持你原来的形式）
-                    const float phi1 = k1 * s * powf(abs_e, 0.5f) + k1p * s * abs_e + k1pp * s * powf(abs_e, 1.0f / (1.0f - d_inf));
-
-                    const float phi2 = k2 * s + k2p * s * abs_e + k2pp * s * powf(abs_e, (1.0f + d_inf) / (1.0f - d_inf));
-
-                    // z1_hat_dot = fd_hat + T + L1 * phi1
-                    dz[i] = fd_hat_in[i] + T_eff[i] + L1 * phi1;
-                    // fd_hat_dot = L2 * phi2
-                    dz[i + 3] = L2 * phi2;
+                    zh[i] = state.z1_hat[i] + 0.5f * h * k1_[i];
+                    fh[i] = state.fd_hat[i] + 0.5f * h * k1_[i + 3];
                 }
-            };
+                diff(zh, fh, k2_);
 
-            float k1_[6], k2_[6], k3_[6], k4_[6];
-
-            diff(state.z1_hat, state.fd_hat, z1_meas, k1_);
-
-            float z1_hat_temp[3], fd_hat_temp[3];
+                // k3
 #pragma unroll
-            for (int i = 0; i < 3; ++i)
-            {
-                z1_hat_temp[i] = state.z1_hat[i] + 0.5f * dt * k1_[i];
-                fd_hat_temp[i] = state.fd_hat[i] + 0.5f * dt * k1_[i + 3];
-            }
+                for (int i = 0; i < 3; ++i)
+                {
+                    zh[i] = state.z1_hat[i] + 0.5f * h * k2_[i];
+                    fh[i] = state.fd_hat[i] + 0.5f * h * k2_[i + 3];
+                }
+                diff(zh, fh, k3_);
 
-            diff(z1_hat_temp, fd_hat_temp, z1_meas, k2_);
-
+                // k4
 #pragma unroll
-            for (int i = 0; i < 3; ++i)
-            {
-                z1_hat_temp[i] = state.z1_hat[i] + 0.5f * dt * k2_[i];
-                fd_hat_temp[i] = state.fd_hat[i] + 0.5f * dt * k2_[i + 3];
-            }
+                for (int i = 0; i < 3; ++i)
+                {
+                    zh[i] = state.z1_hat[i] + h * k3_[i];
+                    fh[i] = state.fd_hat[i] + h * k3_[i + 3];
+                }
+                diff(zh, fh, k4_);
 
-            diff(z1_hat_temp, fd_hat_temp, z1_meas, k3_);
-
+                // update
 #pragma unroll
-            for (int i = 0; i < 3; ++i)
-            {
-                z1_hat_temp[i] = state.z1_hat[i] + dt * k3_[i];
-                fd_hat_temp[i] = state.fd_hat[i] + dt * k3_[i + 3];
-            }
-
-            diff(z1_hat_temp, fd_hat_temp, z1_meas, k4_);
-
-#pragma unroll
-            for (int i = 0; i < 3; ++i)
-            {
-                state.z1_hat[i] += dt / 6.0f * (k1_[i] + 2.0f * k2_[i] + 2.0f * k3_[i] + k4_[i]);
-                state.fd_hat[i] += dt / 6.0f * (k1_[i + 3] + 2.0f * k2_[i + 3] + 2.0f * k3_[i + 3] + k4_[i + 3]);
+                for (int i = 0; i < 3; ++i)
+                {
+                    state.z1_hat[i] += h / 6.0f * (k1_[i] + 2 * k2_[i] + 2 * k3_[i] + k4_[i]);
+                    state.fd_hat[i] += h / 6.0f * (k1_[i + 3] + 2 * k2_[i + 3] + 2 * k3_[i + 3] + k4_[i + 3]);
+                }
             }
         }
 
@@ -134,6 +169,7 @@ namespace heron
         float k1, k1p, k1pp;
         float k2, k2p, k2pp;
         float d_inf;
+        float sub_dt; // observer 的采样时间
 
     public:
         // ------------------

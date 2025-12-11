@@ -18,6 +18,7 @@ hydrodynamics: # 水动力学参数
     Nr: 22.96
 
 fxtdo:
+    dt: 0.01 # 单位：秒
     L1: 1.0
     L2: 1.0
     k1: 2.0
@@ -35,7 +36,7 @@ topics:
     right_thruster_cmd: /heron/right_thruster_cmd
 
 simulation:
-    speed_scale: 5.0 # 速度缩放因子
+    speed_scale: 1.0 # 速度缩放因子
     time_total: 150 # 仿真总时长
     # 机动圆
     radius: 8 # 圆轨迹半径

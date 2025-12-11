@@ -262,6 +262,7 @@ int main(int argc, char **argv)
     nh.param<bool>("fxtdo/enable", dynamics.enable_fxtdo_, true); // 是否使用固定时间扰动观测器
     if (dynamics.enable_fxtdo_)
     {
+        nh.param<float>("fxtdo/dt", dynamics.fxtdo_.sub_dt, 0.01); // FXTDO子步长
         nh.param<float>("fxtdo/L1", dynamics.fxtdo_.L1, 2.2);
         nh.param<float>("fxtdo/L2", dynamics.fxtdo_.L2, 3.5);
         nh.param<float>("fxtdo/k1", dynamics.fxtdo_.k1, 2.2);
