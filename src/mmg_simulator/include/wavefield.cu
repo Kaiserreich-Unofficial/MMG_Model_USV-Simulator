@@ -44,6 +44,56 @@ __global__ void compute_ak(cufftComplex *a_k, float *omega, curandState *states,
     }
 }
 
+// ------------------- 单点波高查询 Kernel -------------------
+__global__ void query_wave_point_kernel(
+    const cufftComplex *a_k, const float *omega,
+    int Nx, int Ny, float Lx, float Ly,
+    float x, float y, float t,
+    float *out)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int Ntot = Ny * (Nx / 2 + 1);
+    if (idx >= Ntot)
+        return;
+
+    int j = idx / (Nx / 2 + 1);
+    int i = idx % (Nx / 2 + 1);
+
+    float kx = i * 2.0f * M_PI / Lx;
+    float ky = (j <= Ny / 2) ? j * 2.0f * M_PI / Ly : (j - Ny) * 2.0f * M_PI / Ly;
+
+    cufftComplex val = a_k[idx];
+    float phase = kx * x + ky * y - omega[idx] * t;
+    float contrib = val.x * cosf(phase) - val.y * sinf(phase);
+
+    atomicAdd(out, contrib); // 所有线程累加到一个输出
+}
+
+// ------------------- 单点速度势查询 Kernel -------------------
+__global__ void query_potential_point_kernel(
+    const cufftComplex *a_k, const float *omega,
+    int Nx, int Ny, float Lx, float Ly,
+    float x, float y, float t,
+    float *out)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int Ntot = Ny * (Nx / 2 + 1);
+    if (idx >= Ntot)
+        return;
+
+    int j = idx / (Nx / 2 + 1);
+    int i = idx % (Nx / 2 + 1);
+
+    float kx = i * 2.0f * M_PI / Lx;
+    float ky = (j <= Ny / 2) ? j * 2.0f * M_PI / Ly : (j - Ny) * 2.0f * M_PI / Ly;
+
+    cufftComplex val = a_k[idx];
+    float phase = kx * x + ky * y - omega[idx] * t;
+    float contrib = (val.x / omega[idx]) * cosf(phase) - (val.y / omega[idx]) * sinf(phase);
+
+    atomicAdd(out, contrib);
+}
+
 namespace wavefield
 {
     // 构造函数实现
@@ -56,22 +106,18 @@ namespace wavefield
         dkx = 2.0f * M_PI / Lx_grid;
         dky = 2.0f * M_PI / Ly_grid;
 
-        // 2. 分配 Device 内存
+        // 2. 分配 Device 内存 (使用更安全的 CUDA_CHECK)
         if (cudaMalloc(&d_a_k, sizeof(cufftComplex) * Ntot_complex) != cudaSuccess)
-        {
             throw std::runtime_error("Failed to allocate d_a_k memory.");
-        }
         if (cudaMalloc(&d_states, sizeof(curandState) * Ntot_complex) != cudaSuccess)
-        {
             throw std::runtime_error("Failed to allocate d_states memory.");
-        }
         if (cudaMalloc(&d_omega, sizeof(float) * Ntot_complex) != cudaSuccess)
-        {
             throw std::runtime_error("Failed to allocate d_omega memory.");
-        }
 
-        // 3. 计算 Host 频率数组 h_omega
+        // 3. 计算 Host 频率和波数数组
         h_omega.resize(Ntot_complex);
+        h_k_abs.resize(Ntot_complex);
+        h_a_k.resize(Ntot_complex); // 确保 Host 存储空间
         for (int j = 0; j < Ny; j++)
         {
             float ky = (j <= Ny / 2) ? j * dky : (j - Ny) * dky;
@@ -80,28 +126,31 @@ namespace wavefield
                 float kx = i * dkx;
                 float k = std::sqrt(kx * kx + ky * ky);
                 float omega = std::sqrt(g * k);
-                h_omega[j * (Nx / 2 + 1) + i] = omega < 1e-6f ? 1e-6f : omega; // 避免除零
+                int idx = j * (Nx / 2 + 1) + i;
+                h_omega[idx] = omega < 1e-6f ? 1e-6f : omega;
+                h_k_abs[idx] = k;
             }
         }
 
         // 4. 传输 Host 频率到 Device
-        cudaMemcpy(d_omega, h_omega.data(), sizeof(float) * Ntot_complex, cudaMemcpyHostToDevice);
+        if (cudaMemcpy(d_omega, h_omega.data(), sizeof(float) * Ntot_complex, cudaMemcpyHostToDevice) != cudaSuccess)
+            throw std::runtime_error("Failed to copy d_omega to device.");
 
         // 5. 启动 CUDA Kernel 生成 a_k
         int blocks = (Ntot_complex + 256 - 1) / 256;
-
         init_random_phase<<<blocks, 256>>>(d_states, Ntot_complex, seed);
-
         dim3 blockDim(16, 16);
         dim3 gridDim((Nx / 2 + 1 + 15) / 16, (Ny + 15) / 16);
-
         compute_ak<<<gridDim, blockDim>>>(
             d_a_k, d_omega, d_states, dkx, dky, Nx, Ny, Hs, Tp, gamma);
 
         if (cudaGetLastError() != cudaSuccess)
-        {
             throw std::runtime_error("CUDA kernel launch failed in constructor.");
-        }
+        cudaDeviceSynchronize(); // 确保 Kernel 完成
+
+        // 6. 关键修正：将生成的 a_k 从 Device 复制到 Host
+        if (cudaMemcpy(h_a_k.data(), d_a_k, sizeof(cufftComplex) * Ntot_complex, cudaMemcpyDeviceToHost) != cudaSuccess)
+            throw std::runtime_error("Failed to copy d_a_k to h_a_k in constructor.");
     }
 
     // 析构函数实现
@@ -247,63 +296,41 @@ namespace wavefield
     }
 
     // ------------------- 单点波高查询实现 -------------------
-
     float WaveFieldCalculator::query_wave_height_point(float x, float y, float t)
     {
-        // 1. 分配临时 Host 内存来存储全场结果
-        float *h_out = new float[Ntot_real];
-        float result = 0.0f;
+        float h_point = 0.0f;
+        float *d_out = nullptr;
+        cudaMalloc(&d_out, sizeof(float));
+        cudaMemset(d_out, 0, sizeof(float));
 
-        try
-        {
-            // 2. 调用全场查询函数，计算整个网格的波高
-            query_wave_height(t, h_out);
+        int threads = 256;
+        int blocks = (Ntot_complex + threads - 1) / threads;
+        query_wave_point_kernel<<<blocks, threads>>>(
+            d_a_k, d_omega, Nx, Ny, Lx_grid, Ly_grid, x, y, t, d_out);
+        cudaDeviceSynchronize();
 
-            // 3. 提取单点值
-            size_t idx = get_grid_index(x, y);
-            result = h_out[idx];
+        cudaMemcpy(&h_point, d_out, sizeof(float), cudaMemcpyDeviceToHost);
+        cudaFree(d_out);
 
-            // 4. 清理内存
-            delete[] h_out;
-
-            return result;
-        }
-        catch (const std::exception &)
-        {
-            // 确保在异常发生时内存也被释放
-            delete[] h_out;
-            throw; // 重新抛出异常
-        }
+        return h_point;
     }
-
     // ------------------- 单点速度势查询实现 -------------------
-
     float WaveFieldCalculator::query_velocity_potential_point(float x, float y, float t)
     {
-        // 1. 分配临时 Host 内存来存储全场结果
-        float *h_out = new float[Ntot_real];
-        float result = 0.0f;
+        float phi_point = 0.0f;
+        float *d_out = nullptr;
+        cudaMalloc(&d_out, sizeof(float));
+        cudaMemset(d_out, 0, sizeof(float));
 
-        try
-        {
-            // 2. 调用全场查询函数，计算整个网格的速度势
-            query_velocity_potential(t, h_out);
+        int threads = 256;
+        int blocks = (Ntot_complex + threads - 1) / threads;
+        query_potential_point_kernel<<<blocks, threads>>>(
+            d_a_k, d_omega, Nx, Ny, Lx_grid, Ly_grid, x, y, t, d_out);
+        cudaDeviceSynchronize();
 
-            // 3. 提取单点值
-            size_t idx = get_grid_index(x, y);
-            result = h_out[idx];
+        cudaMemcpy(&phi_point, d_out, sizeof(float), cudaMemcpyDeviceToHost);
+        cudaFree(d_out);
 
-            // 4. 清理内存
-            delete[] h_out;
-
-            return result;
-        }
-        catch (const std::exception &)
-        {
-            // 确保在异常发生时内存也被释放
-            delete[] h_out;
-            throw; // 重新抛出异常
-        }
+        return phi_point;
     }
-
 }

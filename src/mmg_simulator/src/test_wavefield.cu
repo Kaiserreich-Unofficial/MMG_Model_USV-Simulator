@@ -12,7 +12,7 @@ int main() {
     int Nx = 256, Ny = 256;             // FFT 网格点数
     float Lx_grid = 100.0f;           // 波场物理域 X 长度 (m)
     float Ly_grid = 100.0f;           // 波场物理域 Y 长度 (m)
-    float Hs = 0.1f;                  // 有义波高 (m)
+    float Hs = 0.5f;                  // 有义波高 (m)
     float Tp = 3.5f;                 // 峰值周期 (s)
     float gamma = 3.3f;               // 峰度因子
     unsigned long seed = 1024;        // 随机数种子

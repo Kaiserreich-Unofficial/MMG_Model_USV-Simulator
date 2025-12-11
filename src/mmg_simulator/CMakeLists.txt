@@ -135,17 +135,13 @@ include
   ${CUDA_INCLUDE_DIRS}
 )
 
-cuda_add_library(cuda_waveforce
-    include/extwave.cu
+add_library(lib_extwave
+    include/extwave.cpp
 )
 
 cuda_add_library(cuda_wavefield
     include/wavefield.cu
 )
-
-# cuda_add_library(cuda_waveforce2
-#     include/waveforce.cu
-# )
 
 
 ## Declare a C++ library
@@ -163,7 +159,7 @@ cuda_add_library(cuda_wavefield
 ## The recommended prefix ensures that target names across packages don't collide
 # add_executable(${PROJECT_NAME}_node src/mmg_simulator_node.cpp)
 add_executable(simulator src/simulator.cpp)
-# cuda_add_executable(test_waveforce src/test_waveforce.cu)
+add_executable(test_waveforce src/test_waveforce.cpp)
 cuda_add_executable(test_wavefield src/test_wavefield.cu)
 
 ## Rename C++ executable without prefix
@@ -177,31 +173,27 @@ cuda_add_executable(test_wavefield src/test_wavefield.cu)
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 add_dependencies(simulator ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 add_dependencies(test_wavefield ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-# add_dependencies(test_waveforce ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(test_waveforce ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
 # target_link_libraries(${PROJECT_NAME}_node
 #   ${catkin_LIBRARIES}
 # )
-target_link_libraries(cuda_waveforce
-  ${catkin_LIBRARIES}
-  cufft
-  Eigen3::Eigen
-)
 
 target_link_libraries(cuda_wavefield
   ${catkin_LIBRARIES}
   cufft
 )
 
-# target_link_libraries(cuda_waveforce2
-#   ${catkin_LIBRARIES}
-#   cufft
-# )
+target_link_libraries(lib_extwave
+  ${catkin_LIBRARIES}
+  Eigen3::Eigen
+)
 
 target_link_libraries(simulator
   ${catkin_LIBRARIES}
-  cuda_waveforce
+  lib_extwave
+  cuda_wavefield
   Eigen3::Eigen
 )
 
@@ -211,12 +203,11 @@ target_link_libraries(test_wavefield
   Eigen3::Eigen
 )
 
-# target_link_libraries(test_waveforce
-#   ${catkin_LIBRARIES}
-#   cuda_wavefield
-#   cuda_waveforce2
-#   Eigen3::Eigen
-# )
+target_link_libraries(test_waveforce
+  ${catkin_LIBRARIES}
+  cuda_wavefield
+  lib_extwave
+)
 
 #############
 ## Install ##

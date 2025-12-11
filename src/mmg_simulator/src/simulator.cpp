@@ -17,15 +17,17 @@
 #include "dynamics.hpp"
 #include "utils.hpp"
 
-#include "extwave.cuh"
+#include "extwave.hpp"
+#include "wavefield.cuh"
+
 #include "extwind.hpp"
 
-float dt;                                       // 仿真步长
-VectorSf state_ = VectorSf::Zero();             // 状态变量
-VectorIf input_ = VectorIf::Zero();             // 控制输入
-std::shared_ptr<Simulator::Dynamics> dynamics_; // 指向动力学模型的指针
-std::shared_ptr<CudaWaveForceGenerator> wave_;  // 指向CUDA波力模型的指针
-std::shared_ptr<WindForceGenerator> wind_;      // 指向风力的指针
+float dt;                                                   // 仿真步长
+VectorSf state_ = VectorSf::Zero();                         // 状态变量
+VectorIf input_ = VectorIf::Zero();                         // 控制输入
+std::shared_ptr<Simulator::Dynamics> dynamics_;             // 指向动力学模型的指针
+std::shared_ptr<waveforce::WaveForceCalculator> waveforce_; // F-K 波浪力计算器
+std::shared_ptr<WindForceGenerator> wind_;                  // 指向风力的指针
 
 ros::Publisher odom_pub;        // ODOMETRY 发布器
 ros::Publisher target_odom_pub; // 目标 ODOMETRY 发布器
@@ -70,11 +72,11 @@ void odomCallback(const ros::TimerEvent &event)
     extforce_pub.publish(extforce_msg);
     // 发布odom信息
     state_ = dynamics_->Discrete_Dynamics(state_, input_, dt, extforce); // 更新状态
-
+    sim_time += dt;
     if (wave_enable)
     {
-        sim_time += dt;
-        extwave = wave_->getWaveForce(state_, sim_time);                                                                                       // 计算外部波浪力
+        auto F = waveforce_->compute_force(sim_time, state_(0), state_(1), state_(2));
+        extwave << F.Fx, F.Fy, F.Mz;                                                                                                           // 计算外部波浪力
         ROS_INFO_STREAM_THROTTLE(5.0, ANSI_CYAN << "当前波浪力: " << extwave.transpose().format(Eigen::IOFormat(2, 0, ", ", "\n", "[", "]"))); // 打印验证
     }
     if (wind_enable)
@@ -137,13 +139,16 @@ int main(int argc, char **argv)
 
     // 波浪参数
     int wave_N; // 采样点数
-    float Hs, Tp, wave_direction;
+    float Hs, Tp, wave_direction, wave_L;
     nh.param<bool>("wave/enable", wave_enable, true);
-    nh.param<int>("wave/N", wave_N, 64);
+    nh.param<int>("wave/N", wave_N, 128);
+    nh.param<float>("wave/L", wave_L, 100.0f);
     nh.param<float>("wave/Hs", Hs, .5f);
     nh.param<float>("wave/Tp", Tp, 1.0f);
     nh.param<float>("wave/direction", wave_direction, 0.0);
-    wave_ = std::make_shared<CudaWaveForceGenerator>(wave_N, dt, Hs, Tp, wave_direction / 180.f * M_PI, Length_, Width_, Depth_, Draft_); // 初始化波浪力生成器
+    auto wave_calc = std::make_shared<wavefield::WaveFieldCalculator>(wave_N, wave_N, wave_L, wave_L, Hs, Tp, 3.3, 44);
+    waveforce_ = std::make_shared<waveforce::WaveForceCalculator>(
+        *wave_calc, Length_, Width_, Draft_, 1025, 8, 8);
 
     // 风参数
     float beta_w_;  // 初始风向（degree）

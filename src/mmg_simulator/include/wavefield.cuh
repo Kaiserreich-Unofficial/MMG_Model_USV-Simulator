@@ -30,10 +30,12 @@ namespace wavefield
         int Ntot_complex;
         int Ntot_real;
 
-        // Host 内存: 存储频率
+        // Host 端数据
         std::vector<float> h_omega;
+        std::vector<float> h_k_abs;
+        std::vector<cufftComplex> h_a_k;
 
-        // Device 内存: 存储波谱 a(k) 和随机数状态
+        // Device 端数据
         cufftComplex *d_a_k = nullptr;
         curandState *d_states = nullptr;
         float *d_omega = nullptr;
@@ -51,7 +53,15 @@ namespace wavefield
         float query_velocity_potential_point(float x, float y, float t);
 
         // Accessors
-        int get_Ntot_real() const { return Ntot_real; }
+        const std::vector<float> &get_h_omega() const { return h_omega; }
+        const std::vector<float> &get_h_k_abs() const { return h_k_abs; }
+        const std::vector<cufftComplex> &get_h_a_k() const { return h_a_k; } // 关键：Host端波幅
+        int get_Nx() const { return Nx; }
+        int get_Ny() const { return Ny; }
+        float get_Lx() const { return Lx_grid; }
+        float get_Ly() const { return Ly_grid; }
+        float get_dkx() const { return dkx; }
+        float get_dky() const { return dky; }
 
     private:
         // 辅助函数：将物理坐标 (x, y) 转换为数组索引
