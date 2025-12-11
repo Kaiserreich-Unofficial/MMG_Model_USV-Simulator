@@ -24,6 +24,29 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(Eigen3 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 find_package(CUDA REQUIRED)
+include(FetchContent)
+
+# -------------------------------
+# Fetch matplotlib-cpp
+# -------------------------------
+FetchContent_Declare(
+  matplotlibcpp
+  GIT_REPOSITORY https://github.com/lava/matplotlib-cpp.git
+  GIT_TAG        master
+)
+
+FetchContent_MakeAvailable(matplotlibcpp)
+# matplotlib-cpp 是 header-only，需要添加 include
+include_directories(${matplotlibcpp_SOURCE_DIR})
+
+# matplotlibcpp 还需要 Python 和 matplotlib 库
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} -c "import numpy; print(numpy.get_include())"
+    OUTPUT_VARIABLE NumPy_INCLUDE_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+include_directories(${Python3_INCLUDE_DIRS} ${NumPy_INCLUDE_DIR})
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -200,7 +223,7 @@ target_link_libraries(simulator
 target_link_libraries(test_wavefield
   ${catkin_LIBRARIES}
   cuda_wavefield
-  Eigen3::Eigen
+  ${Python3_LIBRARIES}
 )
 
 target_link_libraries(test_waveforce

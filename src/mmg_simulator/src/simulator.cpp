@@ -139,16 +139,20 @@ int main(int argc, char **argv)
 
     // 波浪参数
     int wave_N; // 采样点数
-    float Hs, Tp, wave_direction, wave_L;
+    int n_span, n_vert; // 船体横向和竖向分段数
+    float Hs, Tp, wave_gamma, wave_L;
     nh.param<bool>("wave/enable", wave_enable, true);
     nh.param<int>("wave/N", wave_N, 128);
     nh.param<float>("wave/L", wave_L, 100.0f);
     nh.param<float>("wave/Hs", Hs, .5f);
     nh.param<float>("wave/Tp", Tp, 1.0f);
-    nh.param<float>("wave/direction", wave_direction, 0.0);
-    auto wave_calc = std::make_shared<wavefield::WaveFieldCalculator>(wave_N, wave_N, wave_L, wave_L, Hs, Tp, 3.3, 44);
+    nh.param<float>("wave/gamma", wave_gamma, 3.3f);
+    nh.param<int>("wave/n_span", n_span, 10);
+    nh.param<int>("wave/n_vert", n_vert, 10);
+
+    auto wave_calc = std::make_shared<wavefield::WaveFieldCalculator>(wave_N, wave_N, wave_L, wave_L, Hs, Tp, wave_gamma, 42);
     waveforce_ = std::make_shared<waveforce::WaveForceCalculator>(
-        *wave_calc, Length_, Width_, Draft_, 1025, 8, 8);
+        *wave_calc, Length_, Width_, Draft_, 1025, n_span, n_vert);
 
     // 风参数
     float beta_w_;  // 初始风向（degree）

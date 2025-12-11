@@ -42,7 +42,7 @@ namespace wavefield
 
     public:
         // 构造函数和析构函数
-        WaveFieldCalculator(int nx, int ny, float lx, float ly, float hs, float tp, float g_factor, unsigned long s);
+        WaveFieldCalculator(int nx, int ny, float lx, float ly, float hs, float tp, float g_factor, unsigned long seed);
         ~WaveFieldCalculator();
 
         // ------------------- 全场查询接口 -------------------

@@ -19,10 +19,10 @@ hydrodynamics:
 
 wave:
     enable: true
-    N: 64 # 采样点数
+    N: 256 # 采样点数
+    L: 200.0 # 波场边长
     Hs: 0.1 # 有义波高
     Tp: 3.5 # 波峰周期
-    direction: 60.0 # 波向
 
 wind:
     enable: true

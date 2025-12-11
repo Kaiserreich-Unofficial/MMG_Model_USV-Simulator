@@ -12,8 +12,8 @@ int main()
     // ============================================================
     // 1. 波场与网格参数
     // ============================================================
-    const int Nx = 64;
-    const int Ny = 64;
+    const int Nx = 256;
+    const int Ny = 256;
     const float Lx = 100.0f;
     const float Ly = 100.0f;
 
@@ -39,8 +39,8 @@ int main()
                                                  0.98f,   // 船宽 B (m)
                                                  0.12f,   // 吃水 draft (m)
                                                  1025.0f, // 水密度 rho (kg/m^3)
-                                                 8,       // 横向采样数 n_span
-                                                 8        // 竖向采样数 n_vert
+                                                 10,       // 横向采样数 n_span
+                                                 10        // 竖向采样数 n_vert
         );
         std::cout << "WaveForceGenerator 初始化成功，船体面元已构建。\n";
 

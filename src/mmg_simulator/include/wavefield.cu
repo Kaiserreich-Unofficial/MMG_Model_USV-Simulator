@@ -97,8 +97,8 @@ __global__ void query_potential_point_kernel(
 namespace wavefield
 {
     // 构造函数实现
-    WaveFieldCalculator::WaveFieldCalculator(int nx, int ny, float lx, float ly, float hs, float tp, float g_factor, unsigned long s)
-        : Nx(nx), Ny(ny), Lx_grid(lx), Ly_grid(ly), Hs(hs), Tp(tp), gamma(g_factor), seed(s)
+    WaveFieldCalculator::WaveFieldCalculator(int nx, int ny, float lx, float ly, float hs, float tp, float g_factor, unsigned long seed)
+        : Nx(nx), Ny(ny), Lx_grid(lx), Ly_grid(ly), Hs(hs), Tp(tp), gamma(g_factor), seed(seed)
     {
         // 1. 计算常量
         Ntot_complex = Ny * (Nx / 2 + 1);
